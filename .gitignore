@@ -1,0 +1,35 @@
+# Secrets et configuration serveur. Rien de tout ceci n'entre jamais dans un commit.
+wp-config.php
+.env
+.env.*
+*.pem
+*.key
+credentials*
+secrets*
+
+# Sauvegardes et bases de données
+*.sql
+*.sql.gz
+*.zip
+*.tar
+*.tar.gz
+backup/
+backups/
+
+# WordPress : ni le coeur, ni les plugins tiers, ni les medias ne sont notre code
+wp-admin/
+wp-includes/
+wp-content/uploads/
+wp-content/cache/
+wp-content/upgrade/
+wp-content/plugins/
+
+# Outils et systemes
+node_modules/
+vendor/
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+*.swp
