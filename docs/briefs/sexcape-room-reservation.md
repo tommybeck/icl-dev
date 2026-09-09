@@ -77,6 +77,8 @@ Langues : français seul au lancement, avec le chemin vers l'anglais et l'allema
 1. ajouter le sous-domaine comme domaine additionnel du même site dans SiteGround Site Tools, avec certificat Let's Encrypt ;
 2. un mu-plugin rend WordPress conscient de l'hôte : quand la requête arrive sur l'hôte Sexcape Room, `home_url`, `site_url`, `content_url`, `option_home`, `option_siteurl`, `upload_dir` et `wp_get_attachment_url` produisent des URL sur cet hôte.
 
+**Précisé après la phase 0.** Filtrer `option_home` atteint bien l'URL de retour de paiement, que Vik construit sur `home_url()`. Filtrer `option_siteurl` reste indispensable pour une autre raison : les appels AJAX du tunnel passent par `admin_url()`, bâti sur `siteurl`, et partiraient sinon vers linstantcle.ch depuis l'hôte Sexcape Room. Enfin, Vik mémorise le résultat de `JUri::base()` pour la durée de la requête : les filtres doivent être posés **avant le premier appel**, ce que la place en mu-plugin garantit.
+
 Garde-fou de mise en œuvre : la réécriture d'URL ne s'applique **qu'aux requêtes front-end sur l'hôte de la marque**. Jamais en administration, jamais sur l'API REST, jamais en cron, parce que réécrire `option_siteurl` en administration casse les URL de l'administration et rend le site inutilisable.
 
 Si la phase 0 démontre que les deux domaines ne peuvent pas partager une installation, replier sur un tunnel entièrement reconstruit qui interroge Vik en coulisses. C'est le palier le plus coûteux et le plus fragile aux mises à jour de Vik : ne l'ouvrir que sur constat, pas sur intuition.
@@ -109,6 +111,13 @@ Ensuite, deux couches obligatoires :
 
 La couche 2 existe parce qu'une URL fabriquée à la main contourne la couche 1, et qu'un client qui atterrit sur la chambre de l'autre marque anéantit toute la promesse.
 
+**Précisé après la phase 0.** La couche 1 se fait par le filtre **`vikbooking_apply_search_results_filtering`**, qui retire une annonce des résultats quand le rappel retourne exactement `false`. Deux limites établies dans le code :
+
+- ce filtre ne couvre **que la vue `search`**. `roomslist`, `availability` et `roomdetails` n'exposent aucun point d'accroche : sur ces écrans, la présentation se règle par les attributs de shortcode, `category_id` pour les deux premiers, `roomid` pour le dernier ;
+- un attribut de shortcode est un **défaut, pas une contrainte** : Vik l'injecte par `def()`, qui cède devant un paramètre GET ou POST de même nom. La couche 1 n'est donc opposable sur aucun écran.
+
+La couche 2 est le seul mécanisme réellement opposable. La greffer sur `vikbooking_before_create_booking_record`, qui se déclenche avant l'insertion.
+
 ### 4.4 E-mails
 
 C'est le point dur du chantier, pas le tunnel.
@@ -117,7 +126,15 @@ C'est le point dur du chantier, pas le tunnel.
 
 **Résolution de marque.** L'expéditeur ne peut pas se déduire de l'hôte de la requête : un envoi peut partir d'une action en administration, d'un cron ou d'une réservation OTA. La marque se résout depuis **la réservation concernée**, donc depuis sa chambre. Si la marque reste indéterminée, l'envoi part sous un expéditeur neutre, journalise un avertissement et alerte. **Jamais sous la mauvaise marque.**
 
-**Contenu.** Plutôt que de se battre contre les gabarits de Vik, désactiver les e-mails clients de Vik pour les réservations directes et envoyer les nôtres, par marque, sur l'événement de confirmation de réservation. Périmètre strict : confirmation et rappel au client direct. Ne pas toucher aux messages liés aux canaux OTA, qui ont leurs propres règles.
+**Contenu. Corrigé après la phase 0 : on réécrit le message en vol, on n'en émet pas un second.** Aucun réglage de Vik ne permet de désactiver les e-mails clients, et le hook d'envoi est un `do_action` incapable d'annuler. On se greffe donc sur **`vikbooking_before_send_booking_mail`**, qui reçoit `[$who, $booking, $mail]`, et on réécrit expéditeur, adresse de réponse, objet et corps par les mutateurs de `VBOMailWrapper`. Un seul chemin d'envoi, donc aucun risque de doublon, et les pièces jointes iCal de Vik sont conservées.
+
+Le hook ne transporte pas les identifiants de chambre : les relire dans `sir_vikbooking_ordersrooms` par `idorder`, puis résoudre la marque par le registre.
+
+Périmètre strict : on ne réécrit que si `$who` vaut `guest` et que `$booking['channel']` est nul, c'est-à-dire une réservation directe. Ne pas toucher aux messages liés aux canaux OTA, qui ont leurs propres règles.
+
+Piège relevé dans `VBOMailWrapper` : passer la même chaîne comme adresse et comme nom d'expéditeur fait disparaître le nom.
+
+**Les rappels avant séjour existent** : ils sont produits par une tâche planifiée définie dans Vik lui-même, et non par les émetteurs relevés en phase 0. **À vérifier en phase 3 :** que ce chemin passe bien par `sendBookingEmail`, donc par le même hook. S'il court-circuite `VBOMailWrapper`, le rappel partira sous l'expéditeur global et trahira la marque, ce qui en fait un critère de recette à part entière.
 
 **Délivrabilité.** Un expéditeur `@sexcaperoom.ch` émis par le serveur qui héberge linstantcle.ch casse l'alignement DKIM et part en indésirable. Donc : SPF, DKIM et DMARC publiés sur sexcaperoom.ch, et un seul service d'envoi transactionnel authentifié pour les deux domaines. Recette : un envoi de test vers une boîte Gmail et une boîte Outlook, en-têtes vérifiés, `dkim=pass` et `spf=pass` pour les deux marques.
 
