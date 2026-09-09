@@ -24,6 +24,10 @@ wp-content/cache/
 wp-content/upgrade/
 wp-content/plugins/
 
+# Copies de travail lues mais jamais versionnees : code de plugins tiers deposes
+# pour inspection, exports, captures. Rien de ce dossier ne part sur GitHub.
+.local/
+
 # Outils et systemes
 node_modules/
 vendor/
