@@ -1,6 +1,8 @@
 # lme-brands
 
-Phase 1 du brief `docs/briefs/sexcape-room-reservation.md` : le registre des marques, la résolution de marque depuis l'identifiant de chambre, la réécriture d'URL consciente de l'hôte, l'écran de santé, et la journalisation. Rien d'autre — ni filtrage de chambres (phase 2), ni e-mails (phase 3), ni paiement (phase 4).
+Phase 1 du brief `docs/briefs/sexcape-room-reservation.md` : le registre des marques, la résolution de marque depuis l'identifiant de chambre, la réécriture d'URL consciente de l'hôte, l'écran de santé, et la journalisation.
+
+Phase 2 : le filtrage des chambres par marque — chapitre 4.3 du brief, couche de présentation puis couche de garde. Rien d'autre — ni e-mails (phase 3), ni paiement (phase 4).
 
 Déployé sous `wp-content/mu-plugins/`. Ce dossier même n'est pas chargé automatiquement par WordPress : c'est `mu-plugins/lme-brands.php`, à la racine de `mu-plugins/`, qui pointe dessus.
 
@@ -20,6 +22,8 @@ mu-plugins/
       logger.php                  journalisation et alerte, chapitre 6
       registry.php                chargement du registre, résolution avec journalisation
       url-rewrite.php             réécriture d'URL par hôte, chapitre 4.1
+      room-filter.php             filtrage des chambres, couche de présentation, chapitre 4.3
+      booking-guard.php           filtrage des chambres, couche de garde, chapitre 4.3
       health-screen.php           écran de santé en administration, chapitre 4.2
     tests/
       test-core.php               tests automatisés de includes/core.php
@@ -105,6 +109,35 @@ Si l'une des deux conditions manque, la valeur d'origine ressort inchangée.
 
 ---
 
+## Filtrage des chambres par marque, chapitre 4.3
+
+Deux couches, parce que Vik n'expose qu'un seul vrai point d'accroche de présentation (`constat-phase-0.md` Q4 : « la couche 1 n'est donc opposable sur aucun écran »).
+
+### Couche de présentation, `includes/room-filter.php`
+
+- **Vue `search`** : filtre natif `vikbooking_apply_search_results_filtering`. Retire une annonce des résultats dès que la chambre n'appartient pas à la marque de l'hôte courant. C'est ce qui fait que la recherche sur `reservation.sexcaperoom.ch` ne retourne que les chambres 4, 9 et 10, et sur `linstantcle.ch` seulement 1, 2, 7 et 8 (critère de recette n°2).
+- **Vues `roomdetails`, `availability`, `roomslist`** : aucun hook n'existe (vérifié dans le code). Leur filtrage tient à un attribut de shortcode (`roomid`, `room_ids`, `category_id`) qui est un *défaut* au sens de `JInput::def()` — il cède devant un paramètre GET ou POST de même nom, démontré en production dans `constat-perimetre-tunnel.md` §6 (`linstantcle.ch/fr/a-huis-clos/?roomid=2` rend L'Aparté). La parade : retirer de la requête, avant que le shortcode ne la lise, tout paramètre qui viserait une chambre étrangère à la marque de l'hôte. Une fois retiré, `def()` réapplique le véritable défaut de la page.
+  - `roomid` (roomdetails) : comparé directement au registre.
+  - `room_ids` (availability) : chaque identifiant de la liste comparé au registre ; un seul étranger fait retirer la liste entière (chapitre 6, aucun échec silencieux — pas de réduction silencieuse).
+  - `category_id` (roomslist) : aucune marque n'est attachée à une catégorie Vik dans le registre — on descend au niveau des chambres que `sir_vikbooking_rooms.idcat` range dans cette catégorie, et on applique la même règle.
+
+**Cette couche est un confort, pas une garantie.** Elle rend une page cohérente avec la marque de son hôte quand un paramètre est fabriqué à la main ; elle ne corrige pas le défaut *natif* d'une page (un shortcode `roomid="10"` reste `roomid="10"` sur les quatre hôtes qui partagent la même installation — un sujet distinct, celui du verrou d'hôte, `brief-verrou-hote-reservation.md`). Elle journalise en avertissement (`foreign_room_param_stripped`), jamais en erreur : ce n'est pas l'un des trois cas que le chapitre 6 exige d'alerter sans exception.
+
+### Couche de garde, `includes/booking-guard.php`
+
+**Le seul mécanisme réellement opposable.** Greffée sur `vikbooking_before_create_booking_record`, qui se déclenche juste avant l'insertion de la commande. Pour chaque chambre de la réservation en cours de création :
+
+- chambre de test (5 ou 6) : toujours autorisée, sur les deux hôtes — c'est la chambre que la réservation factice de bout en bout (`plan-de-marche.md`, chantier E, point E5) réserve délibérément pour vérifier le tunnel sans rien encaisser ;
+- chambre connue, marque de l'hôte : autorisée ;
+- chambre connue, autre marque : **refusée**, journalisée en erreur et alertée (`foreign_room_booking_attempt` — le troisième cas que le chapitre 6 exige d'alerter sans exception) ;
+- chambre absente du registre : **refusée**, déjà journalisée en erreur et alertée par `lme_brands_resolve_room_or_log()` (`unknown_room` — le premier cas du chapitre 6).
+
+Refuser arrête la requête sur place (`wp_die()`, réponse 403) : `vikbooking_before_create_booking_record` est un `do_action_ref_array` ordinaire (`constat-phase-0.md` Q2), il ne peut pas annuler l'insertion par une valeur de retour. Sans cet arrêt immédiat, le contrôleur de Vik atteindrait `$dbo->insertObject()` quelques lignes plus bas, qu'on le veuille ou non.
+
+Un hôte qui n'est celui d'aucune marque du registre (staging, accès direct par IP) désactive les deux couches : aucun contexte de marque à faire respecter, et on ne devine jamais une marque.
+
+---
+
 ## Écran de santé, chapitre 4.2
 
 Administration → Outils → **Santé lme-brands**. Compare les identifiants du registre (`rooms` + `excluded_room_ids`) à `{prefixe}vikbooking_rooms`. Trois sections : chambres présentes dans Vik et absentes du registre, chambres présentes dans le registre et absentes de Vik, chambres synchronisées.
@@ -123,9 +156,9 @@ php mu-plugins/lme-brands/tests/test-core.php
 
 Sortie : une ligne par test, un total, et un code de sortie non nul si un test échoue. Le dernier bloc de tests recharge `config/brands.php` lui-même et vérifie qu'il est valide et fidèle à la carte de vérité du chapitre 2 — une régression dans le fichier de configuration réel casse ces tests, pas seulement les tests sur un registre d'exemple.
 
-**Aucun `php` n'était disponible sur ce poste au moment d'écrire ce plugin** : ces tests n'ont donc pas pu être exécutés ici. Les faire tourner une première fois avant la phase 2 fait partie de la recette de cette phase 1.
+**Aucun `php` n'était disponible sur ce poste au moment d'écrire ce plugin, ni encore au moment d'écrire la phase 2** : ces tests n'ont donc pas pu être exécutés ici, sur aucune des deux phases. Les faire tourner une première fois avant la phase 3 fait partie de la recette de cette phase 2 — la phase 2 ajoute `lme_brands_parse_id_list()`, `lme_brands_extract_room_ids()` et `lme_brands_room_ids_matching_category()` à `includes/core.php`, chacune couverte par de nouveaux tests, et n'a pas pu vérifier davantage que l'équilibrage des accolades et des parenthèses (`grep -o` de chaque fichier, à défaut d'un interpréteur).
 
-`includes/logger.php`, `includes/registry.php`, `includes/url-rewrite.php` et `includes/health-screen.php` appellent des fonctions WordPress (`get_option`, `add_filter`, `$wpdb`, `is_admin`...) et n'ont pas d'équivalent testable hors WordPress dans ce dépôt. Les vérifier suit les procédures manuelles ci-dessous, sur `staging10.linstantcle.ch` de préférence, jamais en production.
+`includes/logger.php`, `includes/registry.php`, `includes/url-rewrite.php`, `includes/room-filter.php`, `includes/booking-guard.php` et `includes/health-screen.php` appellent des fonctions WordPress (`get_option`, `add_filter`, `add_action`, `$wpdb`, `is_admin`, `wp_die`...) et n'ont pas d'équivalent testable hors WordPress dans ce dépôt. Les vérifier suit les procédures manuelles ci-dessous, sur `staging10.linstantcle.ch` de préférence, jamais en production.
 
 ---
 
@@ -183,6 +216,38 @@ add_action( 'lme_brands_alert', function ( $level, $code, $message, $context ) {
 
 - Appeler `lme_brands_resolve_room_or_log( 3 )` deux fois de suite : une seule ligne `ALERTE TEST` doit apparaître (limitation de débit), mais `debug.log` doit contenir deux lignes `[lme-brands] [ERROR]`.
 - Réduire temporairement `LME_BRANDS_ALERT_WINDOW` (ou attendre 15 minutes), rappeler la fonction : une nouvelle `ALERTE TEST` doit partir.
+
+### 6. Couche de présentation, vue `search` (critère de recette n°2)
+
+À faire une fois `reservation.sexcaperoom.ch` en place, sur `staging10.linstantcle.ch` de préférence :
+
+- Sur `reservation.sexcaperoom.ch`, effectuer une recherche de disponibilité depuis la page 844 (`book-now` / `reserver`) : les résultats doivent porter exactement les chambres 4, 9 et 10 (une fois la fiche de la chambre 9 créée, chantier D) — jamais 1, 2, 7 ni 8.
+- Sur `linstantcle.ch`, même recherche, mêmes dates : les résultats doivent porter exactement 1, 2, 7 et 8 — jamais 4, 9 ni 10.
+- Vérifier `debug.log` : rien de nouveau ne doit apparaître pour ces chambres retirées. Une chambre d'une autre marque n'est pas une anomalie, ce n'est pas journalisé.
+
+### 7. Couche de présentation, vues sans hook natif
+
+Sur `reservation.sexcaperoom.ch` :
+
+- Visiter une page `roomdetails` de la marque (ex. la fiche du Boudoir du Désir, chambre 4) en ajoutant `?roomid=1` à l'URL : la page doit continuer à montrer la chambre 4, jamais la chambre 1. Vérifier une ligne `[lme-brands] [WARNING] [foreign_room_param_stripped]` dans `debug.log`, portant `room_id: 1`.
+- Même test avec `?room_ids[]=1&room_ids[]=4` sur une page `availability` : le paramètre entier doit être ignoré (retombée sur le défaut de la page), pas seulement l'identifiant 1.
+- Même test avec `?category_id=<identifiant d'une catégorie Vik qui contient une chambre L'Instant Clé>` sur une page `roomslist`.
+- Sur `linstantcle.ch`, refaire les trois essais avec des identifiants Sexcape Room (4, 9, 10) : même comportement, dans l'autre sens.
+- Contre-épreuve : sur chacun des deux hôtes, un paramètre qui vise une chambre de la **bonne** marque ne doit rien retirer et ne rien journaliser.
+
+### 8. Couche de garde — critère de recette n°3, celui qui doit être vérifiable de bout en bout
+
+Sur `staging10.linstantcle.ch`, jamais en production, avec un mode de paiement hors ligne pour ne rien encaisser :
+
+1. Depuis l'hôte `reservation.sexcaperoom.ch`, construire à la main une requête de réservation (`task=saveorder`) portant la chambre 1 — par exemple en modifiant le champ caché `roomid` du formulaire dans les outils de développement du navigateur avant l'envoi, ou en rejouant la requête `oconfirm` → `saveorder` avec un client HTTP.
+2. Vérifier :
+   - la réponse est l'écran « Réservation refusée » (403), pas la page de confirmation ;
+   - `debug.log` porte une ligne `[lme-brands] [ERROR] [foreign_room_booking_attempt]`, avec `resolved_brand: linstantcle` et `expected_brand: sexcaperoom` dans le contexte ;
+   - l'action `lme_brands_alert` s'est déclenchée (crochet du point 5 ci-dessus) ;
+   - **aucune ligne n'a été ajoutée dans `sir_vikbooking_orders`** pour cette tentative — vérifiable par Code, en lecture seule, par requête MySQL sur les commandes les plus récentes.
+3. Répéter dans l'autre sens : depuis `linstantcle.ch`, tenter la chambre 10.
+4. Réserver la chambre de test 5 depuis les deux hôtes : la réservation doit aboutir normalement, sans refus — c'est la chambre que la réservation factice hebdomadaire (plan-de-marche.md, E5) utilise délibérément sur les deux hôtes.
+5. Réserver une chambre légitime pour chaque hôte (ex. chambre 8 sur `linstantcle.ch`, chambre 4 sur `reservation.sexcaperoom.ch`) : la réservation doit aboutir normalement, sans qu'aucune ligne `lme-brands` n'apparaisse dans `debug.log`.
 
 ---
 

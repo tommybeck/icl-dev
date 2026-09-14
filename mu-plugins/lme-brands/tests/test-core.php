@@ -253,6 +253,75 @@ lme_brands_test_assert( true === $gate3['should_alert'], 'rate_limit_gate : un �
 $gate4 = lme_brands_rate_limit_gate( $gate1['state'], 'autre_code', 1100, 900 );
 lme_brands_test_assert( true === $gate4['should_alert'], "rate_limit_gate : un autre code n'est pas affecté par la limitation" );
 
+// --- lme_brands_parse_id_list ------------------------------------------------
+
+lme_brands_test_assert(
+	array( 1, 7, 10 ) === lme_brands_parse_id_list( '1,7,10' ),
+	'parse_id_list : découpe une chaîne délimitée par des virgules'
+);
+lme_brands_test_assert(
+	array( 1, 7, 10 ) === lme_brands_parse_id_list( '1;7;10' ),
+	'parse_id_list : découpe une chaîne délimitée par des points-virgules'
+);
+lme_brands_test_assert(
+	array( 2, 4 ) === lme_brands_parse_id_list( array( '2', '4' ) ),
+	'parse_id_list : accepte un tableau (soumission room_ids[])'
+);
+lme_brands_test_assert(
+	array() === lme_brands_parse_id_list( '' ),
+	'parse_id_list : une chaîne vide donne une liste vide'
+);
+lme_brands_test_assert(
+	array( 4 ) === lme_brands_parse_id_list( '4,abc,-1' ),
+	'parse_id_list : ignore silencieusement les jetons non entiers'
+);
+
+// --- lme_brands_extract_room_ids ----------------------------------------------
+
+lme_brands_test_assert(
+	array( 10 ) === lme_brands_extract_room_ids( array( array( 'id' => 10, 'name' => 'x' ) ) ),
+	'extract_room_ids : lit la clé id de chaque chambre réservée'
+);
+lme_brands_test_assert(
+	array( 1, 2 ) === lme_brands_extract_room_ids( array( array( 'id' => 1 ), array( 'id' => 2 ), array( 'id' => 1 ) ) ),
+	'extract_room_ids : dédoublonne'
+);
+lme_brands_test_assert(
+	array() === lme_brands_extract_room_ids( array() ),
+	'extract_room_ids : un tableau vide donne une liste vide'
+);
+lme_brands_test_assert(
+	array() === lme_brands_extract_room_ids( null ),
+	"extract_room_ids : une valeur qui n'est pas un tableau donne une liste vide, jamais une erreur"
+);
+$room_object       = new stdClass();
+$room_object->id   = 4;
+lme_brands_test_assert(
+	array( 4 ) === lme_brands_extract_room_ids( array( $room_object ) ),
+	'extract_room_ids : accepte aussi un objet avec une propriété id'
+);
+
+// --- lme_brands_room_ids_matching_category -------------------------------------
+
+$category_tokens = array(
+	1  => array( '1', '2' ),
+	7  => array( '1' ),
+	10 => array( '3' ),
+	2  => array( '2' ),
+);
+lme_brands_test_assert(
+	array( 1, 7 ) === lme_brands_room_ids_matching_category( $category_tokens, 1 ),
+	'room_ids_matching_category : retrouve toutes les chambres portant le jeton'
+);
+lme_brands_test_assert(
+	array() === lme_brands_room_ids_matching_category( $category_tokens, 99 ),
+	"room_ids_matching_category : une catégorie sans chambre connue donne une liste vide"
+);
+lme_brands_test_assert(
+	array() === lme_brands_room_ids_matching_category( array(), 1 ),
+	'room_ids_matching_category : une carte vide donne une liste vide'
+);
+
 // --- Le registre réel du dépôt est valide --------------------------------------
 
 $real_config = require __DIR__ . '/../config/brands.php';

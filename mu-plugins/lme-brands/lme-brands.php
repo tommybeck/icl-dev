@@ -4,7 +4,8 @@
  *
  * Ordre de chargement volontaire : core (pur, sans WordPress) avant logger
  * (qui en dépend), logger avant registry (qui journalise), registry avant
- * url-rewrite et health-screen (qui consomment le registre).
+ * url-rewrite, room-filter, booking-guard et health-screen (qui consomment
+ * tous le registre et sa résolution de marque par hôte).
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -22,4 +23,6 @@ require_once LME_BRANDS_DIR . '/includes/core.php';
 require_once LME_BRANDS_DIR . '/includes/logger.php';
 require_once LME_BRANDS_DIR . '/includes/registry.php';
 require_once LME_BRANDS_DIR . '/includes/url-rewrite.php';
+require_once LME_BRANDS_DIR . '/includes/room-filter.php';
+require_once LME_BRANDS_DIR . '/includes/booking-guard.php';
 require_once LME_BRANDS_DIR . '/includes/health-screen.php';

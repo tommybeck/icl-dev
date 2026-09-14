@@ -279,6 +279,83 @@ function lme_brands_swap_url_host( $url, $new_host ) {
 }
 
 /**
+ * Découpe une liste d'identifiants reçue en paramètre de requête : tableau
+ * (soumission `nom[]=...`) ou chaîne délimitée par virgule ou point-virgule
+ * (format des jetons idrooms/idcat de Vik, constat-phase-0.md Q6). Toute
+ * valeur non entière est silencieusement ignorée : un identifiant de
+ * chambre est toujours un entier positif.
+ *
+ * @param mixed $value
+ * @return int[]
+ */
+function lme_brands_parse_id_list( $value ) {
+	$parts = is_array( $value ) ? $value : preg_split( '/[,;]+/', (string) $value );
+	$ids   = array();
+
+	foreach ( $parts as $part ) {
+		$part = trim( (string) $part );
+		if ( '' !== $part && ctype_digit( $part ) ) {
+			$ids[] = (int) $part;
+		}
+	}
+
+	return $ids;
+}
+
+/**
+ * Identifiants de chambre réservée, extraits de la structure `$rooms` telle
+ * que Vik la construit juste avant l'insertion (site/controller.php de Vik
+ * Booking, méthode saveorder() : chaque élément porte au moins la clé
+ * `id`). Défensif sur la forme exacte (tableau ou objet) : une seule
+ * fonction pure, testable sans dépendre de la structure réelle de Vik au
+ * moment du test.
+ *
+ * @param mixed $rooms
+ * @return int[]
+ */
+function lme_brands_extract_room_ids( $rooms ) {
+	$ids = array();
+
+	if ( ! is_array( $rooms ) ) {
+		return $ids;
+	}
+
+	foreach ( $rooms as $room_booked ) {
+		if ( is_array( $room_booked ) && isset( $room_booked['id'] ) ) {
+			$ids[] = (int) $room_booked['id'];
+		} elseif ( is_object( $room_booked ) && isset( $room_booked->id ) ) {
+			$ids[] = (int) $room_booked->id;
+		}
+	}
+
+	return array_values( array_unique( $ids ) );
+}
+
+/**
+ * Identifiants de chambre dont la carte de jetons de catégorie (telle que
+ * lue depuis sir_vikbooking_rooms.idcat, chaîne de jetons séparés par `;`,
+ * constat-phase-0.md Q4) contient le jeton de cette catégorie. Fonction
+ * pure : la lecture de la table est faite par l'appelant
+ * (includes/room-filter.php), qui n'a pas d'équivalent testable ici.
+ *
+ * @param array $room_category_tokens room_id (int) => jetons (string[]).
+ * @param int   $category_id
+ * @return int[]
+ */
+function lme_brands_room_ids_matching_category( array $room_category_tokens, $category_id ) {
+	$token = (string) (int) $category_id;
+	$ids   = array();
+
+	foreach ( $room_category_tokens as $room_id => $tokens ) {
+		if ( is_array( $tokens ) && in_array( $token, $tokens, true ) ) {
+			$ids[] = (int) $room_id;
+		}
+	}
+
+	return $ids;
+}
+
+/**
  * Limitation de débit pure : décide si une alerte doit partir pour ce code,
  * étant donné un état (map code => dernier horodatage d'alerte) et
  * l'horodatage courant. Ne touche à aucun stockage : includes/logger.php

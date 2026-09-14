@@ -59,12 +59,11 @@ function lme_brands_current_request_brand_host() {
 		return null;
 	}
 
-	if ( empty( $_SERVER['HTTP_HOST'] ) ) {
+	$request_host = lme_brands_current_http_host();
+
+	if ( null === $request_host ) {
 		return null;
 	}
-
-	$request_host = strtolower( (string) wp_unslash( $_SERVER['HTTP_HOST'] ) );
-	$request_host = preg_replace( '/:\d+$/', '', $request_host );
 
 	$config    = lme_brands_get_config();
 	$brand_key = lme_brands_resolve_brand_by_host( $config, $request_host );

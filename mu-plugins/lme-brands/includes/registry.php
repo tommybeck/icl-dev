@@ -85,3 +85,49 @@ function lme_brands_resolve_room_or_log( $room_id ) {
 function lme_brands_resolve_brand_by_host_cached( $host ) {
 	return lme_brands_resolve_brand_by_host( lme_brands_get_config(), $host );
 }
+
+/**
+ * Hôte HTTP de la requête courante, normalisé (minuscule, sans port), ou
+ * null si absent. Point de normalisation partagé par la réécriture d'URL
+ * (includes/url-rewrite.php), le filtrage de présentation et la garde de
+ * réservation (phase 2) : trois lecteurs, une seule façon de lire l'hôte.
+ *
+ * @return string|null
+ */
+function lme_brands_current_http_host() {
+	if ( empty( $_SERVER['HTTP_HOST'] ) ) {
+		return null;
+	}
+
+	$host = strtolower( (string) wp_unslash( $_SERVER['HTTP_HOST'] ) );
+
+	return preg_replace( '/:\d+$/', '', $host );
+}
+
+/**
+ * Marque résolue depuis l'hôte HTTP courant, sans restriction de contexte.
+ *
+ * Contrairement à lme_brands_current_request_brand_host() dans
+ * url-rewrite.php, qui exclut volontairement l'administration, l'API REST
+ * et le cron (chapitre 4.1 du brief : réécrire option_siteurl à ces
+ * endroits casserait l'administration), cette fonction ne fait aucune
+ * exclusion de contexte. Le filtrage de présentation et la garde de
+ * réservation n'en ont pas besoin : ils ne s'exécutent de toute façon que
+ * sur des requêtes front-end réelles (template_redirect, ou le hook de
+ * création de réservation, qui ne se déclenche jamais en administration).
+ *
+ * Un hôte qui n'est celui d'aucune marque du registre (staging, accès
+ * direct par IP) retourne null : on ne devine jamais une marque, ni ici ni
+ * ailleurs.
+ *
+ * @return string|null
+ */
+function lme_brands_current_request_brand_key() {
+	$host = lme_brands_current_http_host();
+
+	if ( null === $host ) {
+		return null;
+	}
+
+	return lme_brands_resolve_brand_by_host( lme_brands_get_config(), $host );
+}
