@@ -74,8 +74,14 @@ Langues : français seul au lancement, avec le chemin vers l'anglais et l'allema
 
 À faire :
 
-1. ajouter le sous-domaine comme domaine additionnel du même site dans SiteGround Site Tools, avec certificat Let's Encrypt ;
+1. ajouter le sous-domaine comme domaine garé **sur le site linstantcle.ch**, dans SiteGround Site Tools, avec certificat Let's Encrypt, après avoir créé chez name.com un enregistrement `A` pointant sur l'adresse IP de **ce serveur-là** ;
 2. un mu-plugin rend WordPress conscient de l'hôte : quand la requête arrive sur l'hôte Sexcape Room, `home_url`, `site_url`, `content_url`, `option_home`, `option_siteurl`, `upload_dir` et `wp_get_attachment_url` produisent des URL sur cet hôte.
+
+**Deux serveurs distincts, et ce que cela impose.** Les deux sites partagent un compte SiteGround mais pas une machine : linstantcle.ch vit sur `gfram1004.siteground.biz`, sexcaperoom.ch sur `gvam1277.siteground.biz`, chacun avec son installation, son utilisateur SSH et son adresse IP. Deux conséquences.
+
+D'abord, l'enregistrement `A` de `reservation.sexcaperoom.ch` doit viser l'IP de `gfram1004`. Le pointer sur celle de sexcaperoom.ch servirait silencieusement le mauvais site : l'erreur ne produit pas de panne, elle produit une page qui ne parle pas de réservation.
+
+Ensuite, et c'est le point coûteux : **les pages du tunnel ne partagent rien avec le site sexcaperoom.ch.** Autre WordPress, autre thème, autres gabarits Elementor, autre médiathèque. L'apparence de marque du tunnel doit donc être **reconstruite dans l'installation linstantcle.ch** : logo, palette, typographie, en-tête et pied de page Sexcape Room, servis sous condition d'hôte. Le visiteur passe d'un serveur à l'autre sans le voir, à condition que la continuité visuelle soit tenue à la main. Prévoir que toute évolution graphique de sexcaperoom.ch se répercute ici, et l'inscrire dans les critères de recette.
 
 **Précisé après la phase 0.** Filtrer `option_home` atteint bien l'URL de retour de paiement, que Vik construit sur `home_url()`. Filtrer `option_siteurl` reste indispensable pour une autre raison : les appels AJAX du tunnel passent par `admin_url()`, bâti sur `siteurl`, et partiraient sinon vers linstantcle.ch depuis l'hôte Sexcape Room. Enfin, Vik mémorise le résultat de `JUri::base()` pour la durée de la requête : les filtres doivent être posés **avant le premier appel**, ce que la place en mu-plugin garantit.
 
@@ -159,7 +165,9 @@ La séparation comptable s'obtient avec des métadonnées de marque sur chaque `
 
 Tout vit dans Make, équipe 2185539, **hors de WordPress**, parce qu'un site en panne ne peut pas alerter sur sa propre panne. Créneaux 05:30, 06:00 et 06:15 déjà pris : prendre 06:30. Alertes par le bot Telegram.
 
-1. **Oracle tarifaire, quotidien.** Pour un jeu de scénarios figés couvrant semaine, weekend, haute saison et séjour minimum sur chaque chambre vendue, interroger le prix public et le comparer aux valeurs attendues tenues dans une table Airtable. Tout écart alerte. C'est exactement ce qui aurait transformé le bug du tarif weekend en alerte du lendemain au lieu de deux mois de perte.
+1. **Oracle tarifaire, quotidien.** Pour un jeu de scénarios figés couvrant semaine, weekend, haute saison et séjour minimum sur chaque chambre vendue, interroger le **prix public par requête HTTP**, jamais la base, et le comparer aux valeurs attendues tenues dans une table Airtable. Interroger le prix public plutôt que la base est un choix, pas un pis-aller : c'est le prix que le client voit qui compte, et c'est lui qui était faux pendant deux mois. Tout écart alerte.
+
+Note d'accès : SiteGround **bloque le transfert de port SSH**, donc aucun tunnel vers MySQL depuis Make. Sans effet ici, l'oracle n'ayant pas besoin de la base. Les valeurs attendues viennent de la grille extraite une fois pour toutes en Q6 du constat et validée par Thomas. Si le chantier analytique a besoin d'un accès MySQL depuis Make, la seule voie restante est l'accès distant MySQL de Site Tools avec liste blanche d'adresses IP, à instruire séparément. C'est exactement ce qui aurait transformé le bug du tarif weekend en alerte du lendemain au lieu de deux mois de perte.
 2. **Détecteur de silence Stripe, quotidien.** Aucun paiement abouti depuis 48 heures en pleine saison alerte. Un tunnel cassé se voit d'abord par l'absence de recette, pas par un message d'erreur.
 3. **Réservation factice de bout en bout, hebdomadaire.** Sur la chambre de test 5, par l'hôte Sexcape Room puis par l'hôte L'Instant Clé, avec un mode de paiement hors ligne pour ne rien encaisser. Vérifier la création, l'expéditeur et le contenu de l'e-mail dans une boîte dédiée, puis annuler et supprimer.
 4. **Veille de version, quotidienne.** Mise à jour automatique de Vik désactivée. Le scénario relève la version installée et alerte si elle a changé, ce qui déclenche une passe manuelle complète de la recette.
@@ -217,6 +225,7 @@ Chaque ligne est une assertion vérifiable, pas une impression.
 5. Réserver la chambre 8 ne change rien à la disponibilité de la chambre 9, et réciproquement.
 6. L'e-mail de confirmation d'une réservation Sexcape Room part de l'expéditeur Sexcape Room, avec le contenu et la signature de cette marque, et passe SPF et DKIM sur Gmail et sur Outlook.
 7. Le retour après paiement Stripe atterrit sur sexcaperoom.ch, sur la page de confirmation de cette marque.
+7 bis. Placées côte à côte, une page de sexcaperoom.ch et une page du tunnel montrent le même logo, la même palette, la même typographie et le même pied de page. Les deux vivent sur des serveurs différents : la continuité est tenue à la main, donc elle se vérifie à l'oeil à chaque livraison.
 8. Le `PaymentIntent` porte la métadonnée de marque et le libellé attendu.
 9. Le prix affiché pour un weekend, sur chaque chambre vendue, correspond à la grille tarifaire de référence.
 10. Un tarif volontairement cassé en préproduction déclenche le message Telegram en moins de 24 heures.

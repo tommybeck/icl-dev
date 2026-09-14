@@ -63,9 +63,27 @@ Pour une requête ponctuelle non interactive (ce que fera Claude Code), le même
 
 ## À faire ensuite
 
-1. **Définir le mode d'exécution non interactif** pour Claude Code : un fichier d'options MySQL côté serveur (`--defaults-extra-file`) plutôt que le mot de passe en argument, pour que les requêtes futures (Q6, oracle tarifaire de la phase 5) puissent s'exécuter sans qu'un humain tape le mot de passe à chaque fois.
-2. **Clore Q6** du constat de phase 0 (`docs/briefs/constat-phase-0.md`) : exécuter les six requêtes de grille tarifaire qui y sont préparées, avec cet accès. Le sondage des délimiteurs et les trois anomalies (weekend absent sur les chambres 8/9, saison été 2026 possiblement inerte, remise long séjour sur les chambres de test) sont déjà consignés, la vérification de l'anomalie B dans le code est en cours par ailleurs.
-3. **Récupérer le greffon de paiement Stripe** par SFTP dans `.local/`, pour clore la réserve de Q5.
+1. **Mode d'exécution non interactif, tranché.** Créer sur le serveur linstantcle.ch un fichier `~/.my.cnf`, en **mode 600**, contenant :
+
+   ```ini
+   [client]
+   user=NOM_UTILISATEUR
+   password=MOT_DE_PASSE
+   ```
+
+   Le client `mysql` le lit tout seul, sans option à passer. Les requêtes deviennent alors :
+
+   ```bash
+   ssh sg-linstantcle "mysql --batch dbvkhvlostfyua -e 'SELECT …'" > .local/q1.tsv
+   ```
+
+   Trois raisons de préférer cette forme à toute autre : le mot de passe ne traverse plus aucun interpréteur de commande, donc les caractères spéciaux cessent de poser problème ; il n'apparaît ni dans `ps` ni dans l'historique du shell, ce qu'un mot de passe en argument ne peut pas garantir ; et il ne quitte jamais le serveur. Thomas crée ce fichier lui-même, personne d'autre ne le lit.
+
+   `--batch` produit du TSV sans encadrement, exploitable directement. Rediriger vers `.local/`, qui est exclu de Git.
+
+   L'**oracle tarifaire de la phase 5 n'utilise pas cet accès** : il interroge le prix public par HTTP depuis Make, parce que c'est le prix vu par le client qui doit être surveillé. Cet accès sert aux extractions ponctuelles, Q6 en tête.
+2. ~~Clore Q6~~ **Fait, 11 septembre 2026.** Les six requêtes de grille tarifaire ont été exécutées avec cet accès, sorties dans `.local/q1_grille_base.tsv` à `.local/q6_repli_minlos.tsv`, résultats reportés dans le tableau de `docs/briefs/constat-phase-0.md`. Six anomalies relevées (A à F), à valider par Thomas.
+3. **Relire le greffon de paiement Stripe**, récupéré dans `.local/wp-vikstripe/`, pour clore la réserve de Q5.
 
 ## Fichiers liés
 

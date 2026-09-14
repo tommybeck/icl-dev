@@ -10,6 +10,7 @@ Ce dépôt ne contient que du code écrit par nous. Ni WordPress, ni les plugins
 WordPress, Elementor Pro, thème enfant Astra, Vik Booking, TranslatePress, Loco Translate, MailPoet, WPForms, hébergement SiteGround, cache NitroPack.
 Base de données : schéma `dbvkhvlostfyua`, préfixe de tables `sir_`, MySQL en UTC.
 Préproduction : `staging10.linstantcle.ch`.
+Back-office WordPress/Elementor de Thomas en **anglais** : donner les libellés de menu en anglais, jamais une traduction française du nom d'un écran.
 
 ---
 
@@ -42,7 +43,17 @@ Le contenu de `mu-plugins/` et de `themes/` se déploie aux emplacements de mêm
 ## Chantier en cours
 
 **Réservation Sexcape Room sur le Vik Booking existant.**
-Brief : `docs/briefs/sexcape-room-reservation.md`. Le lire en entier avant d'écrire une ligne.
+
+- `docs/briefs/plan-de-marche.md` — qui fait quoi, dans quel ordre. **À lire en premier.**
+- `docs/briefs/sexcape-room-reservation.md` — le brief de construction, à lire en entier avant d'écrire une ligne.
+- `docs/briefs/constat-phase-0.md` — ce qui a été établi dans le code de Vik, preuves à l'appui.
+- `docs/briefs/handoff-acces-mysql.md` — accès SSH et MySQL.
+- `docs/briefs/brief-habillage-tunnel.md` — apparence Sexcape Room des pages du tunnel.
+- `docs/briefs/revue-tarifs.md` et `docs/briefs/convention-tarifs-annuelle.md` — corrections tarifaires en cours et règle de portée annuelle.
+
+**Aucune écriture en base, jamais.** Le compte MySQL est en lecture seule et le reste : c'est une décision, pas une limitation subie. Toute modification de tarif, de saison ou de restriction se fait par Thomas dans les écrans natifs de Vik. Code lit, vérifie et constate ; il n'écrit ni par SQL, ni par un plugin qui écrirait à sa place. Voir `convention-tarifs-annuelle.md`.
+
+**Partage du travail.** Claude Code tient le dépôt : `mu-plugins/`, `themes/`, et les fichiers `docs/constat-*.md`. Cowork tient Airtable, Make, Elementor et les fichiers `docs/brief-*.md` et `docs/revue-*.md`. Un fichier, un auteur. Claude Code n'écrit jamais dans Airtable ni dans Make, ne déploie jamais en production, et ne modifie jamais `.local/`, qui est en lecture seule.
 Journal des modifications faites dans l'administration de Vik : `docs/briefs/journal-vik.md`, à tenir à jour à chaque changement.
 
 Décision cadre : un seul Vik Booking, sur linstantcle.ch, fait foi pour les deux marques. Pas de seconde instance, pas de synchronisation iCal entre marques.

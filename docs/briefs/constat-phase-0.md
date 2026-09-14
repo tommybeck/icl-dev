@@ -3,7 +3,7 @@
 Réponses aux six questions du chapitre 7 du brief `sexcape-room-reservation.md`.
 Règle : chaque réponse cite la preuve qui l'établit. Une question sans preuve se déclare non tranchée, jamais déduite.
 
-**Source lue pour Q2, Q4, Q5 et Q6 :** copie SFTP de Vik Booking **1.8.14** (`vikbooking.php:6`), déposée dans `.local/vikbooking/` et `.local/vikchannelmanager/`. Le `.local/README.md` annonçait `.local/vik-source/` : le dossier porte en fait le nom du plugin. Lecture seule, rien n'a été modifié. Tous les chemins ci-dessous sont relatifs à `.local/`, toutes les lignes ont été relues une à une.
+**Source lue pour Q2, Q4, Q5 et Q6 :** copie SFTP de Vik Booking **1.8.14** (`vikbooking.php:6`), déposée dans `.local/vikbooking/` et `.local/vikchannelmanager/`. Le `.local/README.md` annonçait `.local/vik-source/` : le dossier porte en fait le nom du plugin. **Source lue pour la réserve Stripe de Q5 :** copie SFTP du greffon VikStripe **2.2.4** (`vikstripe.php:5`), déposée dans `.local/wp-vikstripe/`. Lecture seule, rien n'a été modifié. Tous les chemins ci-dessous sont relatifs à `.local/`, toutes les lignes ont été relues une à une.
 
 ---
 
@@ -19,7 +19,7 @@ Conséquence pour l'architecture : le palier retenu tient. `reservation.sexcaper
 
 Mise en oeuvre, dans l'ordre, la première étape conditionnant les suivantes :
 
-1. name.com, créer un enregistrement `A` pour `reservation` pointant sur l'adresse IP du site linstantcle.ch, relevée dans SiteGround Site Tools.
+1. name.com, créer un enregistrement `A` pour `reservation` pointant sur l'adresse IP du serveur **`gfram1004.siteground.biz`**, qui porte linstantcle.ch et Vik. Les deux sites vivent sur des machines distinctes, sexcaperoom.ch étant sur `gvam1277.siteground.biz` : viser la mauvaise IP ne produit pas de panne mais sert silencieusement le mauvais site.
 2. SiteGround, sur le site **linstantcle.ch** et non sur celui de sexcaperoom.ch, ajouter `reservation.sexcaperoom.ch` en domaine garé.
 3. Émettre le certificat Let's Encrypt, ce qui exige que le nom résolve déjà : compter la propagation DNS.
 
@@ -310,9 +310,72 @@ Les quatre passerelles livrées suivent ce contrat, par exemple `vikbooking/admi
 
 **1. La passerelle Stripe n'est pas dans cette copie.** `admin/payments/` ne contient que `bank_transfer.php`, `offline_credit_card.php`, `paypal.php` et `paypal_checkout.php`. Une recherche de `stripe` sur tout l'arbre ne remonte que des classes CSS `table-striped`, un champ d'identité pour le pré-enregistrement (`admin/helpers/src/checkin/paxfield/type/stripeidentity.php`) et une ligne de journal des versions (`changelog.md:215`). Stripe est un **greffon distinct**, chargé à l'exécution par le hook documenté `load_payment_gateway_vikbooking` (`vikbooking/libraries/adapter/payment/dispatcher.php:83`, décrit dans `vikbooking/libraries/hooks.md:123-141`).
 
-Le cœur lui remet `return_url` et rien d'autre. Mais **qu'elle utilise cette valeur telle quelle pour `return_url` / `success_url` / `cancel_url` de Stripe, ou qu'elle la reconstruise, n'est pas prouvé.** C'est de la déduction tant que le dossier du greffon Stripe n'a pas été récupéré par SFTP et relu. Le critère de recette n° 7 dépend de ce point.
+Le cœur lui remet `return_url`, `error_url` et `notify_url` à la construction de la commande. **Tranché le 11 septembre 2026, greffon relu dans `.local/wp-vikstripe/` : sur le chemin qui compte, il reconstruit l'URL au lieu d'honorer celle du cœur.** Trois pièces, dans l'ordre réel d'exécution :
 
-**Action préalable à la phase 4 : déposer la copie du greffon Stripe dans `.local/` et refaire ce trajet.**
+**a. La session Stripe Checkout ne pointe pas `success_url` vers `return_url`.** Vérifié sur les deux branches (capture/autorisation et hors-session) :
+
+```
+.local/wp-vikstripe/stripe.php:399-401
+    'submit_type' => …,
+    'success_url' => $this->get('notify_url'),
+    'cancel_url'  => $this->get('return_url') . "&payment=canceled",
+.local/wp-vikstripe/stripe.php:447-450
+    'mode'        => 'setup',
+    'currency'    => …,
+    'success_url' => $this->get('notify_url'),
+    'cancel_url'  => $this->get('return_url'),
+```
+
+`success_url` vaut `notify_url`, pas `return_url`. Seul `cancel_url` honore `return_url` tel quel.
+
+**b. `complete()`, la méthode qui utiliserait `return_url` en cas de succès et `error_url` en cas d'échec, n'est jamais atteinte pour VikBooking.**
+
+```
+.local/wp-vikstripe/stripe.php:667-688
+    protected function complete($res)
+    {
+        …
+        if ($res) { $url = $this->get('return_url'); … }
+        else      { $url = $this->get('error_url'); … }
+        JFactory::getApplication()->redirect($url);
+        exit;
+    }
+```
+
+Le cœur (`afterValidation()`) l'appelle en dernier, après deux actions :
+
+```
+.local/vikbooking/libraries/adapter/payment/payment.php:512
+    do_action_ref_array($this->getHook('payment_on_after_validation'), array(&$this, $res));
+.local/vikbooking/libraries/adapter/payment/payment.php:524
+    do_action_ref_array($this->getDriverHook('payment_on_after_validation'), array(&$this, $res));
+.local/vikbooking/libraries/adapter/payment/payment.php:527
+    $this->complete($res);
+```
+
+**c. VikBooking se greffe justement sur la première de ces deux actions et redirige avant que `complete()` ne s'exécute :**
+
+```
+.local/wp-vikstripe/vikbooking/stripe.php:223-242
+    add_action('payment_on_after_validation_vikbooking', function(&$payment, $res)
+    {
+        if (!$payment->isDriver('stripe')) { return; }
+        $url = 'index.php?option=com_vikbooking&view=booking&sid=' . $payment->get('sid') . '&ts=' . $payment->get('ts');
+        $model  = JModel::getInstance('vikbooking', 'shortcodes', 'admin');
+        $itemid = $model->best(array('booking'));
+        if ($itemid) { $url = JRoute::_($url . '&Itemid=' . $itemid, false); }
+        JFactory::getApplication()->redirect($url);
+        exit;
+    }, 10, 2);
+```
+
+Le commentaire du greffon le dit lui-même : « VikBooking doesn't have a return_url to use within the afterValidation method. Use this hook to construct it ». `$payment->get('return_url')` n'est **jamais lu** ici. `$res` — succès ou échec — n'est **jamais testé** non plus : le client est toujours renvoyé vers la vue `booking` du cœur pour ce `sid`/`ts`, qui affiche elle-même l'état de la réservation. Le `exit` de ce hook empêche `complete()` de s'exécuter : `return_url` et `error_url`, tels que le cœur les a remis, ne servent à rien sur ce chemin.
+
+**Verdict : le greffon reconstruit, il n'honore pas — sauf pour `cancel_url`, seul point où `return_url` est repris tel quel.**
+
+**Conséquence pour la phase 4.** La reconstruction passe par `JRoute::_()`, qui redescend vers `JUri::root()` puis `home_url()` (établi en Q5) : elle reste donc couverte par le même filtrage `option_home` que le reste du tunnel, à condition que ce filtre s'applique à la requête qui déclenche ce hook — ce qui est le cas, puisque c'est le navigateur du client qui atterrit là après Stripe, sur l'hôte que `notify_url` portait déjà à la construction de la commande. Le levier de repli `payment_before_begin_transaction_vikbooking` (documenté en Q5) n'a donc pas d'utilité sur ce chemin précis, puisqu'il agit sur `return_url`, une valeur que ce chemin ignore ; il resterait pertinent uniquement pour `cancel_url`.
+
+**Second point pour la phase 4 : ce n'est pas une page de confirmation par marque qui est servie, mais la vue `booking` native de Vik pour ce `sid`/`ts`.** Le registre du §4.2 du brief prévoit un identifiant de page de confirmation par marque ; ce hook redirige toujours vers la même vue, quelle que soit la marque, sans jamais consulter le registre. Deux voies possibles pour la phase 4, à trancher alors et pas ici : habiller cette vue par hôte (chantier D), ou se greffer sur le même événement `payment_on_after_validation_vikbooking` à une priorité inférieure à 10 pour rediriger ailleurs avant que ce greffon n'agisse et n'appelle `exit`.
 
 **2. `option_siteurl` doit être filtrée aussi, pour une autre raison.** Les appels AJAX du tunnel passent par `admin_url()`, qui est construit sur `siteurl` et non sur `home` :
 
@@ -342,9 +405,9 @@ Piège d'implémentation : l'appel est `do_action($hook, array(&$this))`, donc l
 
 ## Q6. Les tarifs configurés correspondent-ils à la grille attendue ?
 
-**Non tranchée. La grille n'a pas pu être extraite : aucun accès à la base depuis ce poste.**
+**Tranchée, 11 septembre 2026.** Les six requêtes ci-dessous ont été exécutées en lecture seule via `ssh sg-linstantcle "mysql --batch dbvkhvlostfyua -e '…'"`, conformément à `docs/briefs/handoff-acces-mysql.md`. Sorties brutes dans `.local/q1_grille_base.tsv`, `.local/q2_saisons.tsv`, `.local/q3_saisons_par_chambre.tsv`, `.local/q4_restrictions.tsv`, `.local/q5_occupation.tsv` et `.local/q6_repli_minlos.tsv`. Aucune requête n'a renvoyé d'erreur.
 
-`wp`, `mysql` et `mysqldump` sont absents du PATH, et `.local/` ne contient aucun export. La grille tarifaire vit en base, pas dans le code. La poser ici de mémoire ou par déduction serait exactement l'erreur que ce constat doit éviter — d'autant que c'est précisément sur le moteur de prix que le bug du tarif weekend a coûté 1800 francs.
+La grille tarifaire vit en base, pas dans le code : elle ne devait pas être posée de mémoire ni par déduction, d'autant que c'est précisément sur le moteur de prix que le bug du tarif weekend a coûté 1800 francs. Ce qui suit est lu directement dans les sorties, rien n'est déduit.
 
 Ce qui a pu être établi, en revanche, c'est le **modèle de données**, et il réserve trois pièges qu'il fallait connaître avant de lire la moindre valeur.
 
@@ -439,28 +502,63 @@ Exécuté avant les requêtes de grille, pour éviter une jointure qui ne renvoi
 - `seasons`.`idrooms` : format `-10-,-2-,-1-,` confirmé. Les requêtes 3 et 4 sont valides telles quelles.
 - `restrictions`.`idrooms` : format `-7-;`, **point-virgule et non virgule**. Le `LIKE '%-N-%'` fonctionne quand même, par chance et non par conception. Ne jamais écrire une jointure qui suppose le délimiteur : toujours filtrer sur le jeton `-N-`.
 
-### Trois anomalies relevées dans les vingt premières saisons
+### Trois anomalies relevées dans les vingt premières saisons — confirmées sur les 23 saisons complètes, avec une correction
 
-**A. Le supplément weekend ne couvre ni la chambre 8 ni la chambre 9.**
-`Weekend surcharge 2026 (villas)` (id 118) et `2027 (villas)` (id 87) portent `-10-,-2-,-1-,-7-,-4-,-5-,-6-,`. Aucune ligne `Weekend surcharge (rooms)` n'existe, alors que le doublet villas/rooms existe pour l'Immaculée Conception (130/131), l'Ascension (132/133), la Pentecôte (134/135), la Fête-Dieu (136/137) et les vacances d'hiver (139/140). Même absence sur `Fall vacation 2026` (138), `Carnival vacation 2027` (141) et `Easter break 2027` (142).
+`.local/q2_saisons.tsv` contient les 23 lignes de `sir_vikbooking_seasons` (le sondage du 9 septembre ne portait que sur les vingt premières). Aucune ligne n'a `alerte_bornes` renseignée : **aucune saison, parmi les 23, n'est sans bornes de dates.** L'anomalie « saison sans bornes » redoutée en général n'a pas d'autre occurrence que celle déjà connue par construction (voir piège 3, les saisons à cheval sur le Nouvel An portent `alerte_annee` mais ont bien des bornes).
 
-Conséquence : **La Parenthèse et L'Indécent se vendraient au tarif semaine tous les vendredis et samedis de 2026 et 2027.** Ces deux chambres ouvrent à la vente au lancement de Sexcape Room. À corriger avant l'ouverture, indépendamment de ce chantier.
+**A. Le supplément weekend ne couvrait ni la chambre 8 ni la chambre 9 — corrigé par Thomas le 11 septembre 2026, revérifié.**
+Au constat du 9 septembre : `Weekend surcharge 2026 (villas)` (id 118) et `2027 (villas)` (id 87) portaient `-10-,-2-,-1-,-7-,-4-,-5-,-6-,`, sans aucune ligne `Weekend surcharge (rooms)`, alors que le doublet villas/rooms existait pour l'Immaculée Conception (130/131), l'Ascension (132/133), la Pentecôte (134/135), la Fête-Dieu (136/137) et les vacances d'hiver (139/140).
 
-**B. `Summer vacation 2026` (id 27) a un `idrooms` vide.** Si la lecture de `lib.vikbooking.php:7585-7593` est juste, cela signifie aucune chambre, donc saison inerte, donc majoration des nuits de dimanche à jeudi jamais appliquée de tout l'été 2026. **À vérifier en priorité** : relire ces lignes, puis comparer le prix d'une réservation réelle d'août 2026 au prix attendu. Si confirmé, le manque à gagner dépasse celui du bug du tarif weekend.
+**Correction au constat du 9 septembre : `Easter break 2027` a bien un doublet.** La liste complète des 23 saisons montrait déjà `Easter break 2027 (rooms)` (id 143, `-9-,-8-,`, +70/nuit), à côté de `Easter break 2027 (villas)` (id 142). Le sondage précédent, limité aux vingt premières lignes, ne l'avait pas vu.
 
-**C. `Long-stay Discount` (id 122) ne porte que sur `-5-,-6-,`**, les deux chambres de test. La remise long séjour ne s'applique à aucune chambre vendue. Volontaire ou oubli, à trancher par Thomas.
+**Le 11 septembre 2026, Thomas a créé le doublet manquant.** Deux nouvelles lignes dans `sir_vikbooking_seasons`, confirmées par requête (`.local/q2_weekend_rooms_bornes.tsv`, `.local/q3_weekend_8_9.tsv`) :
+
+| id | nom | idrooms | valeur | bornes |
+|---|---|---|---|---|
+| 146 | Weekend surcharge 2026 (rooms) | `-9-,-8-,` | +80/nuit | 2026-09-01 → 2026-12-31, bornée |
+| 147 | Weekend surcharge 2027 (rooms) | `-9-,-8-,` | +80/nuit | 2027-01-01 → 2027-12-31, bornée |
+
+Les deux lignes ont des bornes de dates valides (aucune `alerte_bornes`), portent sur `idprices = -1-,` (le seul plan tarifaire existant) et rejoignent bien les chambres 8 et 9 par la jointure `idrooms LIKE '%-N-%'` (`.local/q3_weekend_8_9.tsv`, vérifié). **L'anomalie A est résolue pour le supplément weekend.**
+
+Chiffré via `.local/q1_grille_base.tsv`, mis à jour le 11 septembre 2026 (`.local/q1_grille_base_maj_8_11sept.tsv`) : chambre 8 et chambre 9 sont désormais toutes deux à **195.00 CHF la nuit en semaine**, et **275.00 CHF la nuit le vendredi et le samedi** (195 + 80 de supplément). Note : le supplément « rooms » vaut +80 CHF/nuit contre +100 CHF/nuit pour le supplément « villas » des chambres 1, 2, 4, 7 et 10 — écart cohérent avec les autres doublets déjà observés (Pâques, Ascension, Pentecôte : 70 contre 100), pas une anomalie supplémentaire.
+
+**Ce qui reste ouvert, non revérifié à cette date : `Fall vacation 2026` (id 138) et `Carnival vacation 2027` (id 141) n'avaient toujours pas de doublet « rooms » au 9 septembre.** Cette session n'a interrogé que le supplément weekend, à la demande explicite ; l'état de ces deux saisons pour les chambres 8 et 9 n'a pas été revérifié aujourd'hui et ne doit pas être supposé corrigé.
+
+**B. `Summer vacation 2026` (id 27) a un `idrooms` vide — confirmé.** `.local/q2_saisons.tsv` le montre directement : colonne `chambres` vide sur cette ligne, seule saison de toutes à porter un `idrooms` vide. Conforme à la lecture de `lib.vikbooking.php:7585-7593` : aucune chambre, donc saison inerte, donc majoration des nuits de dimanche à jeudi jamais appliquée de tout l'été 2026. Autre trait distinctif de cette ligne : c'est la seule saison des 23 dont `year` est `NULL` plutôt qu'un entier — vestige probable d'avant le découpage villas/rooms introduit pour 2027. **Toujours à vérifier en priorité** : comparer le prix d'une réservation réelle d'août 2026 au prix attendu. Si confirmé, le manque à gagner dépasse celui du bug du tarif weekend.
+
+**C. `Long-stay Discount` (id 122) ne porte que sur `-5-,-6-,`**, les deux chambres de test — confirmé par `.local/q3_saisons_par_chambre.tsv` : aucune des sept chambres vendues n'y figure. La remise long séjour ne s'applique à aucune chambre vendue. Volontaire ou oubli, à trancher par Thomas.
 
 **Note annexe.** Les chambres de test 5 et 6 figurent dans presque toutes les saisons « villas ». Sans effet, puisqu'elles ne se vendent pas, mais cela brouille la lecture.
+
+### Anomalies supplémentaires, du même genre, relevées en clôturant Q6
+
+**D et E — résolues le 11 septembre 2026 : Thomas a supprimé la possibilité de réserver plus de 15 nuits, pour toutes les chambres.**
+
+Au constat du 11 septembre (première clôture de Q6), deux anomalies de portée de nuits avaient été relevées : les chambres 1 et 7 n'avaient de prix `dispcost` que jusqu'à 15 nuits quand les chambres 2, 4, 8, 9 et 10 en avaient jusqu'à 30 (anomalie D) ; et sur ce dernier groupe, les chambres 2 et 4 remontaient à leur tarif d'une nuit pour la tranche 16-30 nuits au lieu de poursuivre la baisse, un défaut de monotonicité (anomalie E).
+
+**Rafraîchi le même jour (`.local/q1_grille_base_11sept_refresh.tsv`) : les lignes `dispcost` de 16 à 30 nuits ont été supprimées pour toutes les chambres qui les avaient (2, 4, 8, 9, 10).** Les sept chambres vendues n'ont plus désormais qu'une grille de 1 à 15 nuits, strictement identique en forme à ce que les chambres 1 et 7 avaient déjà. Vérifié : `SELECT … WHERE r.id IN (1,2,4,7,8,9,10)` ne renvoie plus aucune ligne `d.days > 15`, pour aucune des sept chambres.
+
+Conséquence : ce qui était une incohérence de portée entre chambres (D) est devenu une règle uniforme — **séjour maximum 15 nuits pour les sept chambres vendues** — et la rupture de monotonicité (E), qui ne portait que sur la tranche 16-30 désormais retirée, n'a plus de tranche où se produire. **Les deux anomalies sont closes.** Aucune ligne `restrictions.maxlos` ne porte cette limite : elle vient uniquement de l'absence de prix au-delà de 15 nuits dans `dispcost`, comme c'était déjà le cas pour les chambres 1 et 7 avant cette mise à jour.
+
+**F. Portée de chambres incohérente sur la tarification par occupation.** `.local/q5_occupation.tsv` : `sir_vikbooking_adultsdiff` ne contient des lignes que pour les chambres 1 (L'Entracte) et 10 (À Huis Clos) — +30/+60/+90 CHF par nuit pour le 3e, 4e et 5e adulte. Les chambres 2, 4, 7, 8 et 9 n'ont aucune ligne : soit leur capacité ne dépasse pas 2 adultes, soit un surcoût par occupant y est simplement absent de la configuration. Ni l'un ni l'autre n'est établi ici.
 
 ### Restrictions, état relevé
 
 Trois lignes en tout : `No checkout on Christmas 2025` (allrooms=1, échue), `L'Entracte families & friends - no check-in Fri/Sat` (chambre 7), et `L'Entracte families & friends - April only` avec `allrooms=0` et `idrooms` **nul**, donc **inerte**.
 
-Conséquence : les chambres 8, 9 et 10 n'ont aucune restriction propre. Leur séjour minimum retombe sur `prices.minlos` puis sur `config.autodefcalnights`. À confirmer comme voulu avant l'ouverture à la vente.
+**Confirmé par la requête 4 (`.local/q4_restrictions.tsv`) : la troisième ligne n'apparaît dans aucun résultat.** La jointure `rs.allrooms = 1 OR rs.idrooms LIKE '%-N-%'` ne peut la retrouver pour aucune chambre : `allrooms=0` exclut la première branche, `idrooms` nul exclut la seconde. Elle est donc invisible — et sans effet — pour les sept chambres vendues comme pour les deux chambres de test. C'est la preuve directe, par la base, de ce que la lecture du code laissait déjà attendre.
 
-### Requêtes à exécuter pour clore cette question
+**Restriction inerte confirmée : « L'Entracte families & friends - April only » ne s'applique à aucune chambre — même genre d'anomalie que la saison inerte B et la remise inapplicable C, appliqué ici à une restriction plutôt qu'à une saison.**
 
-À lancer dans phpMyAdmin, en lecture seule. Leur sortie collée ici clôt Q6.
+`.local/q4_restrictions.tsv` montre par ailleurs que `No checkout on Christmas 2025` (id 1, toutes chambres) porte sur le 25 décembre **2025** : cette date est passée à la lecture de ce constat (11 septembre 2026), la restriction n'a donc plus d'effet pratique, sans qu'il s'agisse d'une anomalie de configuration au sens des trois catégories suivies ici — juste une ligne échue laissée en place.
+
+La seule restriction encore active et discriminante est `L'Entracte families & friends - no check-in Fri/Sat` (id 2, chambre 7 uniquement), du 2026-04-09 au 2027-12-31 : arrivée fermée le vendredi et le samedi sur cette chambre, pour cette période.
+
+Conséquence inchangée : les chambres 8, 9 et 10 n'ont aucune restriction propre. Leur séjour minimum retombe sur `prices.minlos` puis sur `config.autodefcalnights`. **Confirmé par la requête 6 (`.local/q6_repli_minlos.tsv`) : `autodefcalnights` vaut `1`.** Combiné à `prices.minlos = 1` pour les sept chambres vendues (requête 1) et à l'absence de restriction `minlos` supérieure à 1 sur une plage encore active (requête 4), **le séjour minimum réel est aujourd'hui d'une nuit pour les sept chambres vendues, sans exception.** À confirmer comme voulu avant l'ouverture à la vente.
+
+### Requêtes exécutées pour clore cette question
+
+**Exécutées le 11 septembre 2026**, en lecture seule, via SSH (`ssh sg-linstantcle "mysql --batch dbvkhvlostfyua -e '…'"`) plutôt que phpMyAdmin — l'accès prévu par `docs/briefs/handoff-acces-mysql.md` était en place entre-temps. Sorties dans `.local/q1_grille_base.tsv` à `.local/q6_repli_minlos.tsv`, une par requête, dans l'ordre ci-dessous.
 
 ```sql
 -- 1. Grille de base : chambre × plan tarifaire × durée
@@ -534,35 +632,55 @@ SELECT `param`, `setting` FROM dbvkhvlostfyua.sir_vikbooking_config
 WHERE `param` = 'autodefcalnights';
 ```
 
-### Tableau à valider par Thomas
+### Tableau, rempli et à valider par Thomas
 
-À remplir avec la sortie des requêtes ci-dessus. Une ligne par chambre vendue. **Ce tableau, une fois validé, devient la valeur attendue de l'oracle tarifaire de la phase 5.**
+Rempli à partir des sorties des six requêtes ci-dessus, `.local/q1_grille_base.tsv` à `.local/q6_repli_minlos.tsv`, rafraîchies le 11 septembre 2026. Une ligne par chambre vendue. Prix « semaine » = prix de base `dispcost` pour 1 nuit (requête 1), hors toute saison. Prix « weekend » = même base + `Weekend surcharge` (requêtes 2 et 3) quand la chambre y figure, pour un vendredi ou un samedi hors saison additionnelle. **Ce tableau, une fois validé, devient la valeur attendue de l'oracle tarifaire de la phase 5.**
 
-| Chambre | Expérience | Marque | Prix 1 nuit, semaine | Prix 1 nuit, weekend | Nuits min | Jours d'arrivée imposés | Saisons applicables |
-|---|---|---|---|---|---|---|---|
-| 1 | L'Entracte | L'Instant Clé | | | | | |
-| 7 | L'Entracte all inclusive | L'Instant Clé | | | | | |
-| 10 | À Huis Clos | Sexcape Room | | | | | |
-| 2 | L'Aparté | L'Instant Clé | | | | | |
-| 4 | Le Boudoir du Désir | Sexcape Room | | | | | |
-| 8 | La Parenthèse | L'Instant Clé | | | | | |
-| 9 | L'Indécent | Sexcape Room | | | | | |
+| Chambre | Expérience | Marque | Prix 1 nuit, semaine | Prix 1 nuit, weekend | Nuits min | Nuits max | Jours d'arrivée imposés | Saisons applicables (hors Long-stay Discount et Summer vacation 2026, inertes pour toutes) | Anomalies |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | L'Entracte | L'Instant Clé | 229.00 CHF | 329.00 CHF | 1 | 15 | Aucun | Weekend surcharge 26/27, Carnival 2027, Valentine's (12-13 fév, 14 fév) 2027, Easter break 2027, Ascension 2027, Pentecost 2027, Corpus Christi 2027, Summer vacation 2027, Fall vacation 2026, Immaculée Conception, Winter vacation 2027, Last minute -15% (13 saisons) | F |
+| 7 | L'Entracte - All Inclusive | L'Instant Clé | 390.00 CHF | 490.00 CHF | 1 | 15 | Aucun jour imposé ; **arrivée fermée ven/sam du 2026-04-09 au 2027-12-31** (restriction id 2) | Identique à la chambre 1 (13 saisons) | — |
+| 10 | À Huis Clos | Sexcape Room | 298.00 CHF | 398.00 CHF | 1 | 15 | Aucun | Identique à la chambre 1 (13 saisons) | F |
+| 2 | L'Aparté | L'Instant Clé | 229.00 CHF | 329.00 CHF | 1 | 15 | Aucun | Identique à la chambre 1 (13 saisons) | — |
+| 4 | Le Boudoir du Désir | Sexcape Room | 298.00 CHF | 398.00 CHF | 1 | 15 | Aucun | Identique à la chambre 1 (13 saisons) | — |
+| 8 | La Parenthèse | L'Instant Clé | 195.00 CHF *(mis à jour le 11 septembre 2026, était 149.00 CHF)* | 275.00 CHF *(supplément weekend rooms +80 créé le 11 septembre 2026 ; jusque-là 195.00 CHF, aucune majoration)* | 1 | 15 | Aucun | Weekend surcharge (rooms) 2026/2027, Valentine's (12-13 fév, 14 fév) 2027, Easter break 2027, Ascension 2027, Pentecost 2027, Corpus Christi 2027, Summer vacation 2027, Immaculée Conception, Winter vacation 2027, Last minute -15% (11 saisons) — **encore sans** Carnival 2027, Fall vacation 2026 (non revérifié depuis le 9 septembre) | A (partiel — weekend corrigé) |
+| 9 | L'Indécent | Sexcape Room | 195.00 CHF *(mis à jour le 11 septembre 2026, était 149.00 CHF)* | 275.00 CHF *(supplément weekend rooms +80 créé le 11 septembre 2026 ; jusque-là 195.00 CHF, aucune majoration)* | 1 | 15 | Aucun | Identique à la chambre 8 (11 saisons) | A (partiel — weekend corrigé) |
+
+Notes de lecture du tableau :
+
+- **Nuits min = 1 pour les sept chambres, sans exception** : aucune restriction `minlos` active ne dépasse 1 (requête 4), `prices.minlos` vaut 1 partout (requête 1), et le repli global `autodefcalnights` vaut 1 (requête 6). Les trois sources s'accordent.
+- **Nuits max = 15 pour les sept chambres, depuis le 11 septembre 2026.** Avant cette date, seules les chambres 1 et 7 avaient cette limite ; Thomas l'a étendue aux cinq autres en retirant les lignes `dispcost` de 16 à 30 nuits (requête 1, rafraîchie). Ce n'est pas une restriction `restrictions.maxlos` — cette colonne reste `NULL`/0 partout (requête 4) — mais une conséquence de l'absence de prix au-delà de 15 nuits.
+- **B — `Summer vacation 2026` (id 27) ne s'applique à aucune chambre**, `idrooms` vide (requête 2) : aucune des sept lignes ci-dessus ne la compte, volontairement omise de la colonne « saisons applicables » plutôt que listée comme inapplicable sept fois.
+- **C — `Long-stay Discount` (id 122) ne s'applique à aucune chambre vendue** (requête 3), seulement aux chambres de test 5 et 6 : même traitement, omise ci-dessus.
+- **D et E — closes le 11 septembre 2026** (portée de nuits incohérente et rupture de monotonicité tarifaire) : voir le détail plus haut. Absorbées dans la nouvelle règle « nuits max = 15 », elles ne figurent plus dans la colonne « Anomalies ».
+- **F — chambres 1 et 10 : seules chambres avec une tarification par occupation** (`sir_vikbooking_adultsdiff`, requête 5), +30/+60/+90 CHF par nuit pour le 3e, 4e et 5e adulte. Les cinq autres chambres n'en ont aucune.
 
 ---
 
 ## Verdict de phase
 
-**Palier retenu confirmé. Rien dans le code de Vik ne s'oppose à l'architecture du chapitre 4. La phase 0 n'est pas close pour autant : Q6 reste ouverte et une lecture manque.**
+**Palier retenu confirmé. Rien dans le code ni dans les données de Vik ne s'oppose à l'architecture du chapitre 4. Les six questions du chapitre 7 sont désormais tranchées.**
 
-Cinq questions sur six sont tranchées, et chacune conforte le palier retenu plutôt qu'elle ne l'entame :
-
-- **Q1** — même compte SiteGround, domaine garé possible.
+- **Q1** — même compte SiteGround, domaine garé possible, close.
 - **Q2** — tout part par `wp_mail`, et `vikbooking_before_send_booking_mail` reçoit la réservation : la marque est résoluble à l'envoi. Le point réputé le plus dur du chantier est le mieux outillé.
 - **Q3** — les groupes de disponibilité sont déjà complets et symétriques.
 - **Q4** — le filtrage natif est faible, mais `vikbooking_apply_search_results_filtering` fait proprement la couche 1.
-- **Q5** — l'URL de retour vient de `home_url()`, donc filtrer `option_home` l'atteint.
+- **Q5** — l'URL de retour vient de `home_url()`, donc filtrer `option_home` l'atteint. Le greffon Stripe, relu dans `.local/wp-vikstripe/`, reconstruit cette URL pour VikBooking au lieu d'honorer celle que le cœur lui remet, mais la reconstruction passe par le même `JUri::root()`/`home_url()` : le filtrage prévu la couvre déjà.
+- **Q6** — la grille tarifaire est extraite et documentée dans le tableau ci-dessus. Six anomalies de configuration relevées (A à F, détaillées plus haut), aucune ne remettant en cause l'architecture retenue : ce sont des défauts de données dans Vik, pas des obstacles techniques au chantier de réservation.
 
 Le repli du §4.1, tunnel entièrement reconstruit, **n'a pas lieu d'être ouvert**.
+
+### Les six anomalies de configuration relevées dans les données de Vik, pour mémoire
+
+À traiter par Thomas dans l'administration Vik, hors de ce chantier de code, et à consigner dans `journal-vik.md` le jour où elles le sont :
+
+- **A.** Chambres 8 et 9 exclues du carnaval 2027 et des vacances d'automne 2026 (non revérifié depuis le 9 septembre) — le supplément weekend, lui, a été corrigé par Thomas le 11 septembre 2026 (saisons id 146/147, +80/nuit).
+- **B.** `Summer vacation 2026` (id 27) inerte, `idrooms` vide — majoration d'été 2026 jamais appliquée, sur aucune chambre.
+- **C.** `Long-stay Discount` (id 122) ne porte que sur les chambres de test 5 et 6 — remise long séjour inapplicable à toute chambre vendue.
+- ~~**D.** Chambres 1 et 7 sans prix `dispcost` au-delà de 15 nuits.~~ **Close, 11 septembre 2026** : devenue la règle pour les sept chambres, séjour maximum 15 nuits partout.
+- ~~**E.** Chambres 2 et 4 : rupture de monotonicité tarifaire, le prix par nuit remonte au tarif d'une nuit pour un séjour de 16 à 30 nuits.~~ **Close, 11 septembre 2026** : la tranche 16-30 nuits où l'anomalie se produisait a été retirée.
+- **F.** Tarification par occupation (`adultsdiff`) présente uniquement sur les chambres 1 et 10, absente des cinq autres.
+- Restriction inerte confirmée : « L'Entracte families & friends - April only » (`allrooms=0`, `idrooms` nul) ne s'applique à aucune chambre.
 
 ### Ce qui a changé dans le brief
 
@@ -572,12 +690,12 @@ Le repli du §4.1, tunnel entièrement reconstruit, **n'a pas lieu d'être ouver
 
 ### Ce qui bloque la clôture
 
-1. **Q6 non tranchée.** Aucun accès base depuis le poste de travail. Les six requêtes de la section Q6 sont prêtes ; leur sortie, collée dans le tableau à valider, clôt la question. **C'est le préalable à la phase 5**, l'oracle tarifaire n'ayant aucune référence tant que Thomas n'a pas validé cette grille.
-2. **La passerelle Stripe n'a pas été lue.** Elle ne fait pas partie de Vik Booking : c'est un greffon distinct, absent de la copie. Le cœur lui remet une `return_url` bâtie sur `home_url()`, mais qu'elle l'honore n'est pas prouvé. **Déposer le dossier du greffon Stripe dans `.local/` et refaire le trajet du §Q5 avant la phase 4.** Un levier de repli existe si nécessaire : `payment_before_begin_transaction_vikbooking` avec `JPayment::set('return_url', …)`.
-3. **Vérification d'hébergement en suspens depuis Q1** : que sexcaperoom.ch ne capte pas déjà ses sous-domaines par une règle générique.
+Plus rien côté code ou données. Q6, la vérification d'hébergement du §Q1 et la lecture du greffon Stripe (§Q5) sont réglées. Ne reste que la validation de Thomas, qui ne bloque pas l'ouverture de la phase 1 :
+
+**Validation de Thomas requise sur le tableau de Q6** — le tableau devient l'oracle tarifaire de la phase 5 seulement après cette validation — **et sur le traitement des six anomalies A à F**, avant la phase 5 pour la première, avant l'ouverture à la vente des chambres 8 et 9 pour les anomalies A, D et E.
 
 ### Recommandation
 
-Ouvrir la **phase 1** — registre, résolution de marque, réécriture d'URL, écran de santé, journalisation. Aucun des trois points ci-dessus ne la bloque : le premier vise la phase 5, le deuxième la phase 4, le troisième la bascule de la phase 6.
+Ouvrir la **phase 1** — registre, résolution de marque, réécriture d'URL, écran de santé, journalisation. Le point Stripe ci-dessus ne la bloque pas : il vise la phase 4.
 
 **Validation de Thomas requise avant d'écrire la première ligne de la phase 1.**
