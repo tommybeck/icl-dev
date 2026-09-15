@@ -73,6 +73,7 @@ Reste ouvert, sans instruction d'exécution pour l'instant : le doublet « rooms
 | B1 | Phase 1, mu-plugin : registre, résolution de marque, URL par hôte, écran de santé, journalisation | Sonnet 5, moyen | rien |
 | B2 | Phase 2, filtrage des chambres, présentation puis garde | Sonnet 5, moyen | B1 |
 | B3 | Phase 3, e-mails par marque | **Opus 5, élevé** | B1, et C2 pour la recette |
+| B4a | Réserve de paiement : confirmer la version du greffon, puis établir le sort d'un paiement dont le navigateur ne revient pas | **Opus 5, élevé** | rien, lecture seule |
 | B4 | Phase 4, paiement, retour, page de confirmation | Sonnet 5, moyen | C4, la copie du greffon Stripe |
 
 Après chaque phase : **revue par Cowork**, `docs/revue-phase-N.md`, avant d'ouvrir la suivante. C'est le seul garde-fou contre une phase qui a l'air finie et ne l'est pas.
@@ -180,6 +181,16 @@ Trois choses avancent dès aujourd'hui sans se gêner : le chantier A dans Code,
 ### B3 — phase 3, en Opus 5, effort élevé
 
 > Lis `CLAUDE.md`, le brief et le constat. Exécute la phase 3 : e-mails par marque, par réécriture en vol sur `vikbooking_before_send_booking_mail`, jamais par un second envoi. Relis `sir_vikbooking_ordersrooms` par `idorder` pour obtenir la chambre, puis résous la marque par le registre. Marque indéterminée : expéditeur neutre, avertissement journalisé, alerte, jamais la mauvaise marque. Périmètre : `$who` égal à `guest` et `$booking['channel']` nul. Vérifie en outre si les rappels avant séjour, produits par la tâche planifiée de Vik, empruntent le même chemin d'envoi : s'ils l'évitent, dis-le et propose le point d'accroche. Ne déploie rien.
+
+### B4a — réserve de paiement, lecture seule
+
+> Lis `CLAUDE.md`, puis `docs/briefs/constat-phase-0.md` §Q5 et `docs/briefs/constat-perimetre-tunnel.md` §F : la lecture du greffon Stripe y est déjà faite, contre VikStripe 2.2.4, et ne doit pas être refaite.
+>
+> **Commence par confirmer la version.** Le greffon de `.local/wp-vikstripe/` a été remplacé puis restauré le 15 septembre 2026. Relève son numéro de version à sa source dans le fichier, et vérifie que les lignes citées par les deux constats pointent toujours le code qu'elles décrivent. Si la copie n'est pas la 2.2.4, ou si les lignes ont bougé, dis-le, corrige les citations, et signale l'écart avant d'aller plus loin.
+>
+> **Établis ensuite, preuves et lignes citées, ce que devient une réservation payée dont le navigateur ne revient pas** : onglet fermé après le paiement Stripe, réseau coupé, retour par le bouton précédent. Suis le chemin réel, de `payment_on_after_validation_vikbooking` jusqu'à l'état de la commande en base. Réponds à trois questions : la commande existe-t-elle déjà au moment où le client est redirigé vers Stripe, et dans quel état ; quel code fait passer cette commande à l'état confirmé, et ce code s'exécute-t-il ailleurs que dans la requête de retour du navigateur ; existe-t-il, dans le greffon ou dans le cœur, une tâche planifiée ou un rattrapage qui réconcilierait un paiement encaissé avec une commande restée en attente.
+>
+> Écris le résultat dans un constat dédié, `docs/briefs/constat-reserve-paiement.md`. **N'écris aucun code, ne déploie rien, ne touche à aucun réglage Stripe.** Si la réponse montre qu'un client peut être débité sans réservation confirmée, dis-le en une phrase en tête du constat, et propose les parades sans en choisir une : la décision appartient à Thomas.
 
 ### B4 — phase 4
 
