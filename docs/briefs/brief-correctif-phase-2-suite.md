@@ -78,6 +78,8 @@ Les quatre vues excluent `avail = 0` **dans la requête SQL elle-même**, avant 
 
 Deux fichiers `.DS_Store` sont toujours suivis par Git, à la racine et sous `docs/`, malgré la règle `.gitignore` qui les couvre : l'ignorance ne dépiste pas ce qui est déjà suivi. `git rm --cached` sur les deux.
 
+**Vérifié le 15 septembre 2026 : prémisse fausse, rien à faire.** `git ls-files | grep -i ds_store` ne retourne rien, `git log --all` ne montre aucune trace d'un suivi ni d'un retrait de `.DS_Store` à aucun moment de l'historique de ce dépôt, et `git rm --cached .DS_Store docs/.DS_Store` échoue avec « did not match any files ». Les deux fichiers existent bien sur le disque (`find . -name .DS_Store` les montre à la racine et sous `docs/`) mais `.gitignore:34` les couvre déjà et ils n'ont jamais été indexés. Le critère de recette n°5 (`git status` ne montre plus aucun `.DS_Store` suivi) est donc déjà vrai avant toute intervention — vérifié par `git status --porcelain`, qui n'en liste aucun.
+
 ---
 
 ## 5. Recette
@@ -103,3 +105,4 @@ Deux fichiers `.DS_Store` sont toujours suivis par Git, à la racine et sous `do
 | Version | Date | Modification |
 |---|---|---|
 | 1.0 | 2026-09-15 | Création, à partir de la revue du commit `ddefdd8`. Inversion de l'ordre dans la garde, validation de la présentation des chambres désactivées, hygiène `.DS_Store`. |
+| 1.1 | 2026-09-15 | Exécution. Chapitre 3 répondu et vérifié ligne par ligne dans `.local/vikbooking/` : aucun code de présentation ajouté. Chapitre 2 appliqué, uniquement l'ordre dans `lme_brands_guard_booking_record()` ; `lme_brands_evaluate_booking_room()` inchangée. Chapitre 4 : prémisse fausse, rien à `git rm --cached`, constaté et journalisé au lieu d'être passé sous silence. README de `lme-brands` mis à jour en conséquence (ordre de la garde, procédure de vérification manuelle n°7). |
