@@ -337,6 +337,63 @@ Le point 10 est le seul critère de sortie que cette phase ne tient pas, et il e
 
 ---
 
+## 9. Ce que le plan de marche doit intégrer
+
+**Je n'écris pas dans `plan-de-marche.md`** : il appartient à Cowork (règle du fichier unique, §1 du plan). Ce qui suit est la matière à y reporter, rangée par chantier, pour que rien de ce constat ne reste dans une conversation.
+
+### Chantier B, moteur
+
+| # | Quoi | Tenu par | Attend |
+|---|---|---|---|
+| B3 | **Fait.** Commit `Phase 3 : l'e-mail client porte la marque de sa réservation` | Code | revue par Cowork → `docs/revue-phase-3.md` |
+| **B5** | **Nouveau.** Marquer les rappels avant séjour par `vikbooking_before_send_mail` | Code | décision de Thomas sur le point d'accroche (§4), et B5 bis ci-dessous |
+
+Deux corrections de dépendances dans le tableau B existant :
+
+- B3 était noté « attend B1, et C2 pour la recette ». À lire désormais : **B3 est écrit, et ne se déploie pas sans C2.** Les quatre adresses du registre deviennent agissantes au déploiement, y compris pour L'Instant Clé, qui fonctionne aujourd'hui (§6) ;
+- B5 est volontairement placé après B4 et non avant : le point d'accroche des rappels touche tous les e-mails de Vik, et il vaut mieux l'ouvrir sur une installation dont le tunnel est déjà recetté.
+
+### Chantier C, infrastructure
+
+**C2 s'élargit, et c'est le point à reporter en priorité.** Il était écrit « SPF, DKIM et DMARC sur sexcaperoom.ch, plus un service d'envoi transactionnel authentifié pour les deux domaines ». Trois domaines sont en jeu, pas deux :
+
+| Domaine | Rôle | État |
+|---|---|---|
+| `maisonnette-enchantee.ch` | expéditeur **actuel** de toute l'installation, et expéditeur de repli de l'identité neutre | à aligner |
+| `linstantcle.ch` | expéditeur cible de L'Instant Clé | boîte `reservations@` à vérifier |
+| `sexcaperoom.ch` | expéditeur cible de Sexcape Room | boîte `reservations@` à créer |
+
+Ajouter, comme sous-étape explicite : **vérifier que les quatre boîtes du registre existent et sont relevées**, avant tout déploiement de B3.
+
+### Chantier D, habillage
+
+D1 a relevé le système visuel du **site**. Il lui manque son pendant : **le contenu des e-mails par marque** — corps, signature, images, liens. C'est le livrable qui débloque la séparation du §5, et il ne peut venir que de Cowork et de Thomas. Tant qu'il manque, l'alerte `mail_brand_leak` restera allumée, ce qui est le comportement voulu mais pas un état d'arrivée.
+
+### Chantier E, surveillance
+
+Ajouter un point : **contrôler les règles `rooms.php` des textes conditionnels contre le registre**. Séparer le corps des e-mails par marque (§5) crée une seconde copie de la correspondance chambre → marque, saisie à la main dans Vik. Les textes conditionnels 70 à 73 montrent exactement comment cette copie se désynchronise en silence. Sa place est dans l'écran de santé ou dans un scénario Make, à trancher.
+
+### Nouveau chantier F — contenu des e-mails de Vik
+
+Trois défauts qui touchent des clients qui paient aujourd'hui, **indépendants de toute histoire de marque**. Gestes de Thomas dans l'administration de Vik, à consigner dans `journal-vik.md`.
+
+| # | Quoi | Portée |
+|---|---|---|
+| F1 | Corriger `{condition:access_map_cinema}` en `{condition: access_map_cinema}` dans le gabarit de la tâche 7 | chambres 1 et 5, plan d'accès jamais envoyé |
+| F2 | Donner une règle `rooms.php` aux textes conditionnels 70 à 73, aujourd'hui inertes | chambres 8 et 9 |
+| F3 | Créer les blocs de check-in manquants pour les chambres 7, 8, 9 et 10 | quatre chambres sans nom, ni horaire, ni code de porte, ni adresse dans leur rappel |
+
+F1 est une minute de travail et le plus ancien des trois. F3 doit précéder la première vente des chambres 8, 9 et 10, qui portent déjà `avail = 1`.
+
+**Arbitrage préalable à F3 et au §5 :** Vik groupe ses textes conditionnels par bâtiment — `maisonnette` (2, 4, 6) et `cinema` (1, 5) — là où le brief groupe par calendrier — villa Aparté (2, 4) et villa Entracte (1, 7, 10). Les deux découpages sont défendables, ils ne se recouvrent pas, et la chambre 7 tombe entre les deux. À trancher avant de dupliquer les textes conditionnels, pas après.
+
+### Recette, chapitre 8 du brief
+
+- **Critère n°6** : devient auto-vérifié. L'absence de `mail_brand_leak` dans le journal en est la preuve continue, pas seulement un contrôle de livraison (§8, point 9) ;
+- **Critère n°6 bis, à ajouter** : « Le rappel avant séjour d'une réservation Sexcape Room part de l'expéditeur Sexcape Room, avec le contenu de cette marque. » Non tenu aujourd'hui, et c'est le seul critère de sortie que la phase 3 laisse ouvert.
+
+---
+
 ## Verdict de phase
 
 **Le message client de réservation est par marque.** Expéditeur, adresse de réponse, objet, pièce jointe iCal, et le corps par un mécanisme dont le vide actuel est documenté et alarmé. Marque indéterminée : identité neutre, erreur journalisée, alerte, jamais la mauvaise marque. Aucun second envoi, aucun fichier de Vik modifié, 96 tests unitaires au vert.
@@ -347,4 +404,6 @@ Le point 10 est le seul critère de sortie que cette phase ne tient pas, et il e
 2. le corps par marque, à séparer dans les textes conditionnels de Vik (§5) — Thomas, avec la copie des chantiers D et B3 ;
 3. les rappels avant séjour, dont le point d'accroche est proposé (§4) — à ouvrir sur décision.
 
-**Recommandation de séquencement.** Traiter d'abord les trois défauts du §4 : ils touchent des clients qui paient aujourd'hui, indépendamment de toute histoire de marque, et le plan d'accès du Cinéma manquant depuis un temps inconnu est un espace de trop dans un jeton.
+Ce qu'il faut en reporter dans `plan-de-marche.md`, chantier par chantier, est au §9 — je ne l'écris pas moi-même, ce fichier appartient à Cowork.
+
+**Recommandation de séquencement.** Traiter d'abord les trois défauts du §4 (chantier F proposé au §9) : ils touchent des clients qui paient aujourd'hui, indépendamment de toute histoire de marque, et le plan d'accès du Cinéma manquant depuis un temps inconnu est un espace de trop dans un jeton.

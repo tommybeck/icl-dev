@@ -148,6 +148,37 @@ Un seul filtre permet de supprimer l'envoi sur le chemin du paiement : `onPaymen
 
 **Il n'existe aucun hook dédié à l'annulation** ni de hook `onAfterCreateBookingRecord` côté frontal. Les signaux disponibles sur le cycle de vie sont `vikbooking_before_create_booking_record` (`site/controller.php:1114`, avant l'insertion, sans identifiant) et l'historique `vikbooking_after_save_booking_history` (`vikbooking/site/helpers/history.php:695`), dont l'enregistrement porte `idorder` (`history.php:657`).
 
+### Complément de phase 3, 15 septembre 2026
+
+Q2 reste juste sur tout ce qu'elle affirmait. Elle était **incomplète sur un point**, et la phase 3 l'a comblé : le tableau des émetteurs ci-dessus recense les appelants de `sendBookingEmail()`, et il a été lu comme s'il recensait les e-mails clients. Ce n'est pas la même liste.
+
+**Un huitième émetteur existe, et il n'appelle pas `sendBookingEmail()`.** La tâche planifiée `VikBookingCronJobEmailReminder` (`vikbooking/admin/cronjobs/email_reminder.php`) construit son propre `VBOMailWrapper` et appelle le mailer directement (`admin/helpers/jv_helper.php:123-137`). Le rappel avant séjour ne passe donc **pas** par `vikbooking_before_send_booking_mail`. La réserve que le §4.4 du brief posait est confirmée, pas levée. Cette tâche est publiée et tourne toutes les heures.
+
+**Trois précisions sur les points d'accroche**, toutes vérifiées en exécutant le code, pas en le lisant :
+
+- `onBeforeSendMail` → **`vikbooking_before_send_mail`** (`mailer.php:52`) est le seul hook que **tous** les e-mails de Vik traversent, rappels compris. Il ne transporte que la `VBOMailWrapper`, sans contexte métier. C'est le point d'accroche proposé pour les rappels ;
+- `onBeforeParseEmailTemplate` (`lib.vikbooking.php:5727`), qu'un lecteur pressé prendrait pour le moyen de substituer un gabarit par marque, passe son gabarit **par valeur**. Un rappel qui le déclare par référence ne modifie rien et fait émettre un avertissement PHP à chaque e-mail. Inutilisable ;
+- `onBeforeCreateMailIcalVikBooking` → **`vikbooking_before_create_mail_ical`** (`lib.vikbooking.php:5563`) passe son contenu **par référence**, `[&$ics_str]`. Utilisable, et nécessaire : Vik écrit le titre global du site dans `SUMMARY` (`:5536`) et `LOCATION` (`:5553`) du fichier `.ics` joint au client.
+
+**Les valeurs réelles de l'installation**, relevées en lecture seule et qui manquaient au constat de phase 0 :
+
+| Où | Paramètre | Valeur |
+|---|---|---|
+| `sir_vikbooking_texts` | `fronttitle` | `L'Instant Clé` |
+| `sir_vikbooking_config` | `senderemail` | `info@maisonnette-enchantee.ch` |
+| `sir_vikbooking_config` | `adminemail` | `info@maisonnette-enchantee.ch` |
+| `sir_vikbooking_config` | `attachical` | `1` (fichier `.ics` joint au client) |
+| `sir_vikbooking_config` | `sitelogo` | `linstant-cle-noir-logo-transp-new.png` |
+| `sir_options` | `home`, `siteurl` | `https://linstantcle.ch` |
+| `sir_options` | `fromname` | **absente** |
+
+Deux conséquences que Q2 ne pouvait pas voir :
+
+1. l'expéditeur de toute l'installation n'est **ni** `@linstantcle.ch` **ni** `@sexcaperoom.ch`, mais un troisième domaine. Le chantier C2 porte donc sur trois domaines, pas deux ;
+2. `fromname` étant absente, le repli de `jv_helper.php:90-95` échoue, et le nom d'expéditeur du rappel se replie sur `getFrontTitle()`. **Le rappel avant séjour part aujourd'hui sous le nom `L'Instant Clé`, pour toutes les chambres, Sexcape Room comprises.**
+
+Le détail, les preuves ligne à ligne et le point d'accroche proposé : **`constat-phase-3-emails.md`**.
+
 ---
 
 ## Q3. Les liaisons de disponibilité reflètent-elles les groupes attendus ?
@@ -662,7 +693,7 @@ Notes de lecture du tableau :
 **Palier retenu confirmé. Rien dans le code ni dans les données de Vik ne s'oppose à l'architecture du chapitre 4. Les six questions du chapitre 7 sont désormais tranchées.**
 
 - **Q1** — même compte SiteGround, domaine garé possible, close.
-- **Q2** — tout part par `wp_mail`, et `vikbooking_before_send_booking_mail` reçoit la réservation : la marque est résoluble à l'envoi. Le point réputé le plus dur du chantier est le mieux outillé.
+- **Q2** — tout part par `wp_mail`, et `vikbooking_before_send_booking_mail` reçoit la réservation : la marque est résoluble à l'envoi. Le point réputé le plus dur du chantier est le mieux outillé. **Complété le 15 septembre 2026** : ce hook ne voit pas les rappels avant séjour, qui empruntent un autre chemin d'envoi — voir le complément de phase 3 ci-dessus.
 - **Q3** — les groupes de disponibilité sont déjà complets et symétriques.
 - **Q4** — le filtrage natif est faible, mais `vikbooking_apply_search_results_filtering` fait proprement la couche 1.
 - **Q5** — l'URL de retour vient de `home_url()`, donc filtrer `option_home` l'atteint. Le greffon Stripe, relu dans `.local/wp-vikstripe/`, reconstruit cette URL pour VikBooking au lieu d'honorer celle que le cœur lui remet, mais la reconstruction passe par le même `JUri::root()`/`home_url()` : le filtrage prévu la couvre déjà.
