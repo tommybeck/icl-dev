@@ -29,3 +29,10 @@ add_action(
 	},
 	20
 );
+
+/**
+ * Habillage Sexcape Room des pages du tunnel de réservation, conditionné à
+ * l'hôte. Chantier D, docs/briefs/brief-habillage-tunnel.md. Fichier
+ * autonome : le retirer restaure l'apparence Astra sur les deux hôtes.
+ */
+require_once get_stylesheet_directory() . '/inc/sexcaperoom-tunnel.php';

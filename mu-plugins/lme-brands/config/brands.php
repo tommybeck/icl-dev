@@ -23,6 +23,8 @@
  *   signature             signature en pied d'e-mail.
  *   confirmation_page_id  identifiant de la page de confirmation (phase 4).
  *   languages             langues actives pour cette marque.
+ *   appearance            optionnel, chantier D (habillage du tunnel) — voir
+ *                        le bloc dédié plus bas pour la forme exacte.
  *
  * Forme attendue, chaque chambre (clé = identifiant Vik, entier) :
  *   brand                clé de marque ci-dessus.
@@ -59,6 +61,37 @@
  * de départ, cohérentes en forme mais pas encore arrêtées sur le fond :
  * la copie finale par marque est un livrable des chantiers D (habillage) et
  * B3 (e-mails), à confirmer avant l'ouverture de la phase 3.
+ *
+ * Chantier D (habillage du tunnel), chapitre 4.1 du brief principal et
+ * docs/briefs/brief-habillage-tunnel.md en entier. Clé optionnelle
+ * `appearance`, présente uniquement sur les marques dont le tunnel a besoin
+ * d'un habillage propre — aujourd'hui `sexcaperoom` seule, `linstantcle`
+ * gardant l'apparence Astra existante. Données seulement, comme le reste de
+ * ce fichier : c'est le thème enfant (themes/astra-child/) qui lit cette
+ * clé et construit le CSS, jamais l'inverse.
+ *   colors   couleurs `--srlm-*` relevées le 9 septembre 2026 dans le CSS
+ *            personnalisé du kit Elementor de sexcaperoom.ch, plus les deux
+ *            couleurs d'erreur tranchées avec Thomas le 12 septembre 2026.
+ *   radii    rayons `--srlm-arc*`, signature « haut arrondi, bas presque
+ *            droit » du site.
+ *   fonts    par rôle ('serif', 'sans', 'voix') : `family` (nom nu, pour le
+ *            descripteur font-family de @font-face — doit correspondre au
+ *            premier nom de `stack`), `stack` (la pile CSS complète, avec
+ *            repli) et `faces` (liste de fichiers `.woff2`, chacun avec
+ *            `weight`, `style`, `file`). Fichiers servis par l'installation
+ *            linstantcle.ch elle-même (contrainte d'implémentation n°4 du
+ *            brief d'habillage : aucune dépendance à un domaine tiers).
+ *            Chemins relatifs à themes/astra-child/assets/fonts/sexcaperoom/.
+ *   shell    largeur et gouttière communes à toutes les pages du tunnel.
+ *   logo     chemin d'un logo, ou null. Décision de Thomas, 15 septembre
+ *            2026 (docs/briefs/brief-habillage-tunnel.md, « État au 12
+ *            septembre 2026 ») : aucun logo ni favicon n'existe aujourd'hui
+ *            sur sexcaperoom.ch, seulement un nom en toutes lettres. Le
+ *            tunnel affiche donc ce nom en typographie (`--srlm-serif`),
+ *            comme le fait déjà le pied de page du site — jamais une
+ *            supposition de chemin d'image. Le jour où un logo existe,
+ *            renseigner ce champ suffit : aucune ligne de CSS à changer.
+ *   favicon  chemin d'un favicon, ou null. Même décision, même raison.
  */
 
 return array(
@@ -90,6 +123,80 @@ return array(
 			'signature'            => "L'équipe Sexcape Room",
 			'confirmation_page_id' => 0, // à renseigner en phase 4.
 			'languages'            => array( 'fr' ), // anglais et allemand tracés, non livrés au lancement.
+
+			'appearance' => array(
+
+				'logo'    => null, // voir la décision du 15 septembre 2026 ci-dessus.
+				'favicon' => null,
+
+				'colors' => array(
+					'noir'          => '#0C0A09', // fond principal.
+					'laque'         => '#16110E', // fond de surface.
+					'laque_haute'   => '#1E1712', // surface en relief.
+					'laque_basse'   => '#100C0A', // surface en creux.
+					'puits'         => '#0A0807', // fond le plus sombre ; fond des champs de formulaire.
+					'or_haut'       => '#F0BE5A',
+					'or'            => '#E3AA3E', // or de référence, accent.
+					'or_bas'        => '#A87C22',
+					'or_poli'       => 'linear-gradient(158deg,#F0BE5A 0%,#E3AA3E 46%,#A87C22 100%)',
+					'or_poli_vif'   => 'linear-gradient(158deg,#F7CC72 0%,#EDB94E 45%,#BC8C28 100%)', // survol.
+					'or_sombre'     => '#241802',
+					'laiton'        => '#B08A2E', // bordure des champs au repos.
+					'laiton_mat'    => '#7A5E1E',
+					'ivoire'        => '#F2EDE4', // texte clair.
+					'etain'         => '#B6ADA2', // texte secondaire.
+					'focus'         => '#F2EDE4', // anneau de focus sur fond sombre.
+					'focus_sombre'  => '#0C0A09', // anneau de focus sur fond clair.
+					// Tranchées avec Thomas le 12 septembre 2026, absentes du
+					// CSS personnalisé du kit avant cette date.
+					'alerte'        => '#C9463C', // bordure de champ en erreur, titre de bandeau.
+					'alerte_clair'  => '#E2776A', // message d'erreur sous le champ, accent de bandeau.
+				),
+
+				'radii' => array(
+					// --srlm-arc de base ; le kit le redéfinit par requête de
+					// média entre 140px et 395px, non reproduit ici : le
+					// tunnel n'emprunte pas l'ornementation en arche du site
+					// (« Ce qui ne se copie pas » du brief d'habillage).
+					'arc'       => '150px',
+					'arc_btn'   => '18px 18px 4px 4px',
+					'arc_puce'  => '14px 14px 3px 3px',
+					'arc_champ' => '10px 10px 3px 3px',
+				),
+
+				'fonts' => array(
+					'serif' => array(
+						'family' => 'Marcellus', // doit correspondre au premier nom de 'stack', pour le descripteur font-family de @font-face.
+						'stack'  => "'Marcellus','Hoefler Text','Times New Roman',serif", // titres.
+						'faces'  => array(
+							array( 'weight' => 400, 'style' => 'normal', 'file' => 'marcellus-v14-latin_latin-ext-regular.woff2' ),
+						),
+					),
+					'sans' => array(
+						'family' => 'Jost',
+						'stack'  => "'Jost','Avenir Next','Helvetica Neue',Arial,sans-serif", // interface, surtitres, boutons.
+						'faces'  => array(
+							array( 'weight' => 400, 'style' => 'normal', 'file' => 'jost-v20-latin_latin-ext-regular.woff2' ),
+							array( 'weight' => 500, 'style' => 'normal', 'file' => 'jost-v20-latin_latin-ext-500.woff2' ),
+							array( 'weight' => 600, 'style' => 'normal', 'file' => 'jost-v20-latin_latin-ext-600.woff2' ),
+							array( 'weight' => 700, 'style' => 'normal', 'file' => 'jost-v20-latin_latin-ext-700.woff2' ),
+						),
+					),
+					'voix' => array(
+						'family' => 'Lora',
+						'stack'  => "'Lora','Iowan Old Style','Georgia',serif", // textes de voix, citations.
+						'faces'  => array(
+							array( 'weight' => 400, 'style' => 'normal', 'file' => 'lora-v37-latin_latin-ext-regular.woff2' ),
+							array( 'weight' => 400, 'style' => 'italic', 'file' => 'lora-v37-latin_latin-ext-italic.woff2' ),
+						),
+					),
+				),
+
+				'shell' => array(
+					'max_width' => '1180px',
+					'padding'   => '22px',
+				),
+			),
 		),
 
 	),

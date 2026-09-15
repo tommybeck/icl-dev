@@ -1,0 +1,182 @@
+/**
+ * Habillage Sexcape Room des pages du tunnel de réservation.
+ *
+ * Règles structurelles seulement : uniquement des sélecteurs et des
+ * var(--srlm-*) / var(--vbo-*), aucune valeur de couleur, de police ou de
+ * rayon en dur — toutes viennent du bloc :root généré par
+ * inc/sexcaperoom-tunnel.php depuis mu-plugins/lme-brands/config/brands.php
+ * (clé 'appearance' de la marque 'sexcaperoom'), chargé avant cette feuille
+ * (dépendance 'lme-sexcaperoom-tokens').
+ *
+ * Enqueue conditionné à l'hôte (voir inc/sexcaperoom-tunnel.php) : cette
+ * feuille n'est jamais chargée sur les pages L'Instant Clé. Les sélecteurs
+ * ci-dessous peuvent donc rester larges (body, .btn, select) sans risque de
+ * fuite — le chapitre 4.1 du brief l'autorise explicitement : « habiller
+ * par une feuille de style chargée sous condition d'hôte ».
+ *
+ * Sélecteurs Vik Booking vérifiés dans le code de
+ * wp-content/plugins/vikbooking/ (site/resources/vikbooking_styles.css et
+ * les gabarits des sept écrans du tunnel), pas devinés. Ce qui n'a pas pu
+ * être vérifié dans le temps imparti à cette phase est documenté dans
+ * docs/briefs/constat-habillage-tunnel.md plutôt que deviné en silence.
+ *
+ * Ce qui ne se copie pas (brief-habillage-tunnel.md) : l'ornementation en
+ * arche du site, reflets et motifs de clé. Rien de tel ici.
+ */
+
+/* ---------------------------------------------------------------------
+   Page : fond, texte, typographie de base.
+   ------------------------------------------------------------------- */
+
+body {
+	background: var(--srlm-noir);
+	color: var(--srlm-ivoire);
+	font-family: var(--srlm-font-sans);
+}
+
+h1, h2, h3, h4, h5, h6 {
+	font-family: var(--srlm-font-serif);
+}
+
+a {
+	color: var(--srlm-or);
+}
+
+a:hover {
+	color: var(--srlm-or-haut);
+}
+
+/* Largeur et gouttière communes à toutes les pages du tunnel — reprend
+   .srlm-shell du site sexcaperoom.ch, appliqué ici au conteneur Astra. */
+.ast-container {
+	max-width: var(--srlm-shell-max-width);
+	padding-left: var(--srlm-shell-padding);
+	padding-right: var(--srlm-shell-padding);
+}
+
+/* Wordmark de secours tant qu'aucun logo n'existe (brief-habillage-tunnel.md,
+   décision du 15 septembre 2026) — même traitement que le pied de page de
+   sexcaperoom.ch, qui affiche déjà `<span class="srlm-marque-nom">`. Prêt à
+   l'emploi pour les gabarits d'en-tête et de pied de page construits dans
+   Ultimate Addons (hors du périmètre de ce fichier). */
+.srlm-marque-nom {
+	font-family: var(--srlm-font-serif);
+	color: var(--srlm-ivoire);
+	letter-spacing: .02em;
+}
+
+/* ---------------------------------------------------------------------
+   Boutons. .vbo-pref-color-btn et sa variante secondaire sont les classes
+   de « couleur préférée » propres à Vik Booking (site/resources/
+   vikbooking_styles.css) : bouton de recherche, bouton de confirmation,
+   etc. Vérifié : site/views/vikbooking/tmpl/default.php pose
+   `class="btn vbo-pref-color-btn"` sur le bouton de recherche (écran 1).
+   ------------------------------------------------------------------- */
+
+.btn {
+	border-radius: var(--srlm-arc-btn) !important;
+	font-family: var(--srlm-font-sans);
+}
+
+.vbo-pref-color-btn,
+.btn.vbo-pref-color-btn {
+	background: var(--srlm-or-poli) !important;
+	color: var(--srlm-noir) !important;
+	border: none !important;
+	font-weight: 600;
+}
+
+.vbo-pref-color-btn:hover,
+.btn.vbo-pref-color-btn:hover {
+	background: var(--srlm-or-poli-vif) !important;
+	color: var(--srlm-noir) !important;
+}
+
+.vbo-pref-color-btn-secondary {
+	background: var(--srlm-laque-haute) !important;
+	color: var(--srlm-ivoire) !important;
+	border: 2px solid var(--srlm-laiton) !important;
+}
+
+.vbo-pref-color-btn-secondary:hover {
+	background: var(--srlm-laque-basse) !important;
+	color: var(--srlm-ivoire) !important;
+}
+
+/* ---------------------------------------------------------------------
+   Champs de formulaire. Fond, bordure et texte viennent déjà des jetons
+   --vbo-input-style / --vbo-border-color / --vbo-text-color reteintés en
+   :root (inc/sexcaperoom-tunnel.php) : Vik les applique lui-même à tous ces
+   sélecteurs (vérifié dans vikbooking_styles.css). Seuls le rayon et
+   l'épaisseur de bordure — non pilotés par une variable chez Vik — sont
+   redéfinis ici, sélecteur par sélecteur, pour la signature « haut arrondi,
+   bas presque droit » du brief.
+
+   Écran 1 (recherche) : .vbdivsearch .vb-search-inner select, dates du
+     bloc .vbo-search-inpblock (input-group).
+   Écran 2/4 (options) : .vbo-showprc-optionstable, .vbo-availability-controls.
+   Écran 4 (coordonnées) : .vbo-oconfirm-cfield-input, .vbcustomfields.
+   Vérifié aussi dans site/resources/vbo-appearance-auto.css, qui reskine
+   ces mêmes sélecteurs pour le mode sombre automatique de Vik — c'est le
+   patron le plus proche de ce fichier dans le code existant.
+   ------------------------------------------------------------------- */
+
+.vbdivsearch .vb-search-inner select,
+.vbo-showprc-optionstable .vbo-showprc-option-entry > div select,
+.vbo-availability-controls select,
+.vbageintervals select,
+.vbo-oconfirm-cfield-input select,
+.vbo-oconfirm-cfield-input input,
+.vbo-oconfirm-cfield-input textarea,
+.vbdivsearch .vb-search-inner .vbo-search-inpblock .input-group > input {
+	border-radius: var(--srlm-arc-champ) !important;
+	border-width: 2px !important;
+	font-family: var(--srlm-font-sans);
+}
+
+/* Libellés de champ — recette exacte du brief (§ Styles de champ),
+   appliquée aux libellés réels de la recherche et des coordonnées. */
+.vbdivsearch .vb-search-inner > div label,
+.vbcustomfields .vbo-oconfirm-cfield-label label {
+	font-family: var(--srlm-font-sans);
+	font-weight: 600;
+	font-size: .8rem;
+	letter-spacing: .16em;
+	text-transform: uppercase;
+	color: var(--srlm-or);
+}
+
+/* ---------------------------------------------------------------------
+   Bandeau d'alerte de page — recette exacte du brief (§ Styles de champ,
+   second patron), appliquée aux éléments d'erreur réels de Vik : le
+   paragraphe générique `p.err` (site/helpers/error_form.php) et le popup
+   `.vbo-alert-container-confirm` de l'écran de coordonnées (site/views/
+   oconfirm/tmpl/default.php). Aucune classe d'erreur *par champ* n'a été
+   trouvée dans le code de Vik pendant cette phase — voir
+   docs/briefs/constat-habillage-tunnel.md — donc aucun patron d'erreur de
+   champ n'est inventé ici.
+   ------------------------------------------------------------------- */
+
+p.err,
+.vbo-enterpin-error {
+	background: var(--srlm-laque-haute);
+	border: 2px solid var(--srlm-alerte);
+	border-radius: var(--srlm-arc-btn);
+	padding: 1em 1.1em;
+	color: var(--srlm-ivoire);
+	font-family: var(--srlm-font-sans);
+	font-size: .9rem;
+	line-height: 1.5;
+}
+
+.vbo-alert-container-confirm {
+	background: var(--srlm-laque-haute) !important;
+	border: 2px solid var(--srlm-alerte);
+	border-radius: var(--srlm-arc-btn) !important;
+	color: var(--srlm-ivoire) !important;
+	font-family: var(--srlm-font-sans);
+}
+
+.vbo-alert-close {
+	color: var(--srlm-alerte-clair) !important;
+}
