@@ -25,6 +25,24 @@
  *   languages             langues actives pour cette marque.
  *   appearance            optionnel, chantier D (habillage du tunnel) — voir
  *                        le bloc dédié plus bas pour la forme exacte.
+ *   mail                  optionnel, phase 3 (e-mails par marque) — voir le
+ *                        bloc dédié plus bas.
+ *
+ * Forme attendue, l'identité neutre `neutral` (obligatoire, phase 3) :
+ *   label         nom affiché quand aucune marque n'est nommable, utilisé
+ *                 aussi dans la pièce jointe iCal.
+ *   sender_name   nom d'expéditeur correspondant.
+ *   sender_email  adresse d'expéditeur, ou null pour garder celle que Vik a
+ *                 posée (`senderemail` de sa configuration).
+ *   reply_to      adresse de réponse, ou null pour garder celle de Vik.
+ *   subject       objet du message, par langue.
+ *
+ * Forme attendue, le bloc `mail` d'une marque (phase 3, chapitre 4.4) :
+ *   subject         objet du message par langue ; table vide ou absente =
+ *                   garder l'objet natif de Vik.
+ *   replacements    substitutions littérales appliquées à l'objet et au
+ *                   corps, dans l'ordre de déclaration.
+ *   signature_html  fragment HTML inséré avant `</body>`, ou null.
  *
  * Forme attendue, chaque chambre (clé = identifiant Vik, entier) :
  *   brand                clé de marque ci-dessus.
@@ -57,10 +75,19 @@
  * dans Vik que personne n'a enregistrée), pas un état qui se confond avec
  * une exclusion volontaire.
  *
- * expéditeur, adresse de réponse et signature ci-dessous sont des valeurs
- * de départ, cohérentes en forme mais pas encore arrêtées sur le fond :
- * la copie finale par marque est un livrable des chantiers D (habillage) et
- * B3 (e-mails), à confirmer avant l'ouverture de la phase 3.
+ * expéditeur, adresse de réponse et signature ci-dessous restent des valeurs
+ * de départ, cohérentes en forme mais pas arrêtées sur le fond.
+ *
+ * **Point bloquant pour le déploiement de la phase 3.** Aujourd'hui, tout
+ * e-mail client de cette installation part de `info@maisonnette-enchantee.ch`
+ * (`senderemail` de `sir_vikbooking_config`, relevé du 15 septembre 2026).
+ * La phase 3 remplace cette adresse par `sender_email` de la marque résolue,
+ * pour les deux marques, L'Instant Clé comprise. Avant de déployer, les
+ * quatre adresses ci-dessous (`sender_email` et `reply_to` de chaque marque)
+ * doivent exister en tant que boîtes et être autorisées à émettre par le
+ * service d'envoi transactionnel du chantier C2 : sans quoi la réponse d'un
+ * client rebondit, et c'est une régression sur une marque qui fonctionne.
+ * Voir §6 de docs/briefs/constat-phase-3-emails.md.
  *
  * Chantier D (habillage du tunnel), chapitre 4.1 du brief principal et
  * docs/briefs/brief-habillage-tunnel.md en entier. Clé optionnelle
@@ -96,15 +123,52 @@
 
 return array(
 
+	/**
+	 * Identité neutre, phase 3. Elle sert quand la marque d'une réservation
+	 * ne peut pas être établie : chambre absente du registre, ou réservation
+	 * qui mêle deux marques (composable à la main dans l'administration de
+	 * Vik, la garde de réservation l'interdisant depuis le tunnel).
+	 *
+	 * §4.4 du brief : « Si la marque reste indéterminée, l'envoi part sous un
+	 * expéditeur neutre, journalise un avertissement et alerte. Jamais sous la
+	 * mauvaise marque. »
+	 *
+	 * `sender_email` et `reply_to` valent null, et c'est un choix, pas un
+	 * oubli. Relevé du 15 septembre 2026, en lecture seule : Vik est configuré
+	 * avec `senderemail` = `info@maisonnette-enchantee.ch`
+	 * (`sir_vikbooking_config`), une adresse qui ne nomme ni L'Instant Clé ni
+	 * Sexcape Room et dont la boîte existe, puisqu'elle sert déjà. Garder
+	 * cette adresse et ne remplacer que le nom affiché donne un expéditeur qui
+	 * ne nomme aucune marque, sans inventer une adresse dont les réponses
+	 * rebondiraient. Le jour où le service d'envoi transactionnel du chantier
+	 * C2 est en place, renseigner ici une adresse dédiée est le geste attendu.
+	 */
+	'neutral' => array(
+		'label'        => 'Réservations',
+		'sender_name'  => 'Réservations',
+		'sender_email' => null,
+		'reply_to'     => null,
+		'subject'      => array(
+			// L'allemand figure ici parce qu'il est déjà une langue réelle de
+			// l'installation : 453 des 1758 réservations de la base portent
+			// `lang` = `de-CH` ou `de-DE` (relevé du 15 septembre 2026), alors
+			// que `languages` de L'Instant Clé ne déclare que `en` et `fr`.
+			// Écart signalé en §7 de docs/briefs/constat-phase-3-emails.md ;
+			// le corriger est une décision de marque, pas un geste de code.
+			'fr' => 'Votre réservation',
+			'en' => 'Your reservation',
+			'de' => 'Ihre Reservierung',
+		),
+	),
+
 	'brands' => array(
 
 		'linstantcle' => array(
 			'label' => "L'Instant Clé",
-			// À confirmer contre l'option `home` réelle du site avant la
-			// phase 6. Un écart ici est sans risque pour la réécriture
-			// d'URL (voir README, "pourquoi un host approximatif ne casse
-			// rien"), mais doit être exact pour que l'écran de santé et les
-			// phases suivantes s'appuient sur la bonne valeur.
+			// Vérifié le 15 septembre 2026, en lecture seule : `sir_options`
+			// porte `home` = `https://linstantcle.ch` et `siteurl` =
+			// `https://linstantcle.ch`. La valeur ci-dessous est donc exacte,
+			// et non plus approximative comme le notait la phase 1.
 			'host'                 => 'linstantcle.ch',
 			'sender_email'         => 'reservations@linstantcle.ch',
 			'sender_name'          => "L'Instant Clé",
@@ -112,6 +176,22 @@ return array(
 			'signature'            => "L'équipe L'Instant Clé",
 			'confirmation_page_id' => 0, // à renseigner en phase 4.
 			'languages'            => array( 'en', 'fr' ),
+
+			'mail' => array(
+				// Objet laissé à Vik. Il le compose avec le titre global de
+				// l'installation (`VBOMAILSUBJECT` + `fronttitle`), et ce
+				// titre vaut exactement « L'Instant Clé » (relevé du
+				// 15 septembre 2026 dans `sir_vikbooking_texts`) : l'objet
+				// natif nomme donc déjà la bonne marque pour celle-ci. Rien à
+				// remplacer, donc rien de remplacé — phase 3 ne change pas un
+				// e-mail qui est déjà juste.
+				'subject'        => array(),
+				// Aucune substitution : le gabarit global d'e-mail est celui
+				// de L'Instant Clé, il n'a rien d'étranger à corriger.
+				'replacements'   => array(),
+				// Le gabarit porte déjà son propre pied de page.
+				'signature_html' => null,
+			),
 		),
 
 		'sexcaperoom' => array(
@@ -123,6 +203,44 @@ return array(
 			'signature'            => "L'équipe Sexcape Room",
 			'confirmation_page_id' => 0, // à renseigner en phase 4.
 			'languages'            => array( 'fr' ), // anglais et allemand tracés, non livrés au lancement.
+
+			'mail' => array(
+				// Une réservation allemande retomberait sur cette entrée,
+				// faute de mieux, et c'est voulu : l'objet d'une autre langue
+				// de la bonne marque vaut mieux que l'objet natif de Vik, qui
+				// nommerait L'Instant Clé.
+				'subject' => array(
+					'fr' => 'Votre réservation — Sexcape Room',
+				),
+
+				/**
+				 * Volontairement vide, et ce vide est une position, pas un
+				 * trou à combler plus tard.
+				 *
+				 * Le corps du message vient du gabarit unique de Vik
+				 * (`site/helpers/email_tmpl.php`), qui est celui de L'Instant
+				 * Clé : logo, photos de la villa, blocs « occasions
+				 * spéciales », « repas », « massages », et treize URL sur
+				 * linstantcle.ch. Y substituer « L'Instant Clé » par « Sexcape
+				 * Room » ne rendrait pas ce message sexcapien : cela le
+				 * rendrait faux, et cela ferait taire le contrôle de fuite qui
+				 * signale précisément que ce corps n'est pas encore le bon.
+				 *
+				 * Le corps se sépare par marque dans Vik, pas ici : les textes
+				 * conditionnels (`{condition: ...}`) portent déjà toute la
+				 * copie de cette installation — 72 enregistrements dans
+				 * `sir_vikbooking_condtexts` au 15 septembre 2026 — et la
+				 * règle native `rooms.php` conditionne un bloc aux chambres
+				 * réservées. Marche à suivre détaillée en §5 de
+				 * docs/briefs/constat-phase-3-emails.md.
+				 */
+				'replacements'   => array(),
+
+				// La copie Sexcape Room n'est pas arrêtée : livrable des
+				// chantiers D et B3. Renseigner ici un fragment HTML le pose
+				// avant `</body>`, sans toucher une ligne de code.
+				'signature_html' => null,
+			),
 
 			'appearance' => array(
 

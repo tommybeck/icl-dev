@@ -42,6 +42,16 @@ function lme_brands_test_assert( $condition, $label ) {
  */
 function lme_brands_test_sample_config() {
 	return array(
+		'neutral' => array(
+			'label'        => 'Réservations',
+			'sender_name'  => 'Réservations',
+			'sender_email' => null,
+			'reply_to'     => null,
+			'subject'      => array(
+				'fr' => 'Votre réservation',
+				'en' => 'Your reservation',
+			),
+		),
 		'brands' => array(
 			'linstantcle' => array(
 				'label'                => "L'Instant Clé",
@@ -52,6 +62,11 @@ function lme_brands_test_sample_config() {
 				'signature'            => "L'équipe L'Instant Clé",
 				'confirmation_page_id' => 12,
 				'languages'            => array( 'en', 'fr' ),
+				'mail'                 => array(
+					'subject'        => array(),
+					'replacements'   => array(),
+					'signature_html' => null,
+				),
 			),
 			'sexcaperoom' => array(
 				'label'                => 'Sexcape Room',
@@ -62,6 +77,13 @@ function lme_brands_test_sample_config() {
 				'signature'            => "L'équipe Sexcape Room",
 				'confirmation_page_id' => 34,
 				'languages'            => array( 'fr' ),
+				'mail'                 => array(
+					'subject'        => array(
+						'fr' => 'Votre réservation — Sexcape Room',
+					),
+					'replacements'   => array(),
+					'signature_html' => null,
+				),
 			),
 		),
 		'rooms' => array(
@@ -440,6 +462,325 @@ $real_test_room_5 = lme_brands_resolve_room( $real_config, 5 );
 lme_brands_test_assert(
 	'refuse_unavailable' === lme_brands_evaluate_booking_room( $real_test_room_5, false, 'linstantcle' ),
 	'non-régression : la chambre de test 5, à avail = 0, est refusée par la garde même sur son propre hôte de marque'
+);
+
+// --- Phase 3 : destinataire visé par une itération d'envoi -----------------------
+
+echo "\nlme_brands_mail_audience()\n";
+
+lme_brands_test_assert(
+	'guest' === lme_brands_mail_audience( 'guest' ),
+	"'guest' vise le client — le seul cas que les quinze appels de sendBookingEmail() produisent"
+);
+
+lme_brands_test_assert(
+	'guest' === lme_brands_mail_audience( 'customer' ),
+	"'customer' vise le client aussi : Vik teste guest OU customer (lib.vikbooking.php:6414)"
+);
+
+lme_brands_test_assert(
+	'admin' === lme_brands_mail_audience( 'admin' ),
+	"'admin' vise l'administrateur, hors périmètre de la réécriture"
+);
+
+lme_brands_test_assert(
+	'custom' === lme_brands_mail_audience( 'guest@example.com' ),
+	"une adresse littérale contenant « guest » est un destinataire personnalisé : l'ordre des tests de Vik est respecté"
+);
+
+lme_brands_test_assert(
+	'none' === lme_brands_mail_audience( '' ) && 'none' === lme_brands_mail_audience( null ),
+	'une valeur vide ou non textuelle ne vise personne'
+);
+
+// --- Phase 3 : résolution de marque depuis les chambres d'une réservation --------
+
+echo "\nlme_brands_resolve_brand_for_rooms()\n";
+
+$config = lme_brands_test_sample_config();
+
+$one_room = lme_brands_resolve_brand_for_rooms( $config, array( 4 ) );
+lme_brands_test_assert(
+	'ok' === $one_room['status'] && 'sexcaperoom' === $one_room['brand_key'],
+	'une réservation de la seule chambre 4 résout vers Sexcape Room'
+);
+
+$same_brand = lme_brands_resolve_brand_for_rooms( $config, array( 1, 7 ) );
+lme_brands_test_assert(
+	'ok' === $same_brand['status'] && 'linstantcle' === $same_brand['brand_key'],
+	'deux chambres de la même marque résolvent vers cette marque'
+);
+
+$duplicated = lme_brands_resolve_brand_for_rooms( $config, array( 4, 4, '4' ) );
+lme_brands_test_assert(
+	'ok' === $duplicated['status'] && array( 4 ) === $duplicated['room_ids'],
+	'les identifiants répétés, entiers ou textuels, sont dédoublonnés'
+);
+
+$mixed = lme_brands_resolve_brand_for_rooms( $config, array( 1, 4 ) );
+lme_brands_test_assert(
+	'undetermined' === $mixed['status'] && 'mixed_brands' === $mixed['reason'],
+	'une réservation qui mêle deux marques est indéterminée, jamais rattachée à la première chambre venue'
+);
+
+$unknown = lme_brands_resolve_brand_for_rooms( $config, array( 3 ) );
+lme_brands_test_assert(
+	'undetermined' === $unknown['status'] && 'unknown_room' === $unknown['reason'] && array( 3 ) === $unknown['unknown_rooms'],
+	'une chambre absente du registre rend la réservation indéterminée'
+);
+
+$unknown_and_mixed = lme_brands_resolve_brand_for_rooms( $config, array( 1, 3 ) );
+lme_brands_test_assert(
+	'undetermined' === $unknown_and_mixed['status'] && 'unknown_room' === $unknown_and_mixed['reason'],
+	"une chambre inconnue l'emporte sur toute autre raison : c'est le cas que le chapitre 6 exige d'alerter"
+);
+
+$no_room = lme_brands_resolve_brand_for_rooms( $config, array() );
+lme_brands_test_assert(
+	'undetermined' === $no_room['status'] && 'no_rooms' === $no_room['reason'],
+	"une réservation sans chambre lisible est indéterminée, jamais un envoi sous une marque par défaut"
+);
+
+// --- Phase 3 : langues ------------------------------------------------------------
+
+echo "\nlme_brands_normalize_language_tag() et lme_brands_pick_localized()\n";
+
+lme_brands_test_assert(
+	'fr' === lme_brands_normalize_language_tag( 'fr-FR' )
+		&& 'de' === lme_brands_normalize_language_tag( 'de_CH' )
+		&& 'en' === lme_brands_normalize_language_tag( 'en' )
+		&& 'fr' === lme_brands_normalize_language_tag( '  FR-fr ' ),
+	"les étiquettes réelles de sir_vikbooking_orders.lang se ramènent à leur code primaire"
+);
+
+lme_brands_test_assert(
+	null === lme_brands_normalize_language_tag( '' )
+		&& null === lme_brands_normalize_language_tag( null )
+		&& null === lme_brands_normalize_language_tag( array() ),
+	"une langue absente reste absente, jamais devinée"
+);
+
+$subjects = array( 'fr' => 'Objet FR', 'en' => 'Objet EN' );
+
+lme_brands_test_assert(
+	'Objet EN' === lme_brands_pick_localized( $subjects, array( 'en', 'fr' ) ),
+	'la première langue préférée disponible gagne'
+);
+
+lme_brands_test_assert(
+	'Objet FR' === lme_brands_pick_localized( $subjects, array( 'de' ) ),
+	"une langue absente de la table se replie sur la première entrée : l'objet d'une autre langue de la bonne marque vaut mieux que celui de l'autre marque"
+);
+
+lme_brands_test_assert(
+	null === lme_brands_pick_localized( array(), array( 'fr' ) ),
+	"une table vide ne produit pas d'objet : l'appelant garde celui de Vik"
+);
+
+// --- Phase 3 : substitutions et injection -----------------------------------------
+
+echo "\nlme_brands_apply_text_replacements() et lme_brands_inject_html_before_body_end()\n";
+
+lme_brands_test_assert(
+	'bonjour monde' === lme_brands_apply_text_replacements( 'bonjour terre', array( 'terre' => 'monde' ) ),
+	'une substitution littérale simple est appliquée'
+);
+
+lme_brands_test_assert(
+	'a c' === lme_brands_apply_text_replacements( 'a b c', array( 'b ' => '' ) ),
+	'un remplacement vide supprime le terme cherché'
+);
+
+lme_brands_test_assert(
+	'x' === lme_brands_apply_text_replacements( 'x', array( '' => 'y', 'x' => null ) ),
+	'une substitution mal formée est ignorée, pas appliquée de travers'
+);
+
+lme_brands_test_assert(
+	'<body>a<b>SIG</body>' === lme_brands_inject_html_before_body_end( '<body>a<b></body>', 'SIG' ),
+	"le fragment entre avant </body>, pas après </html>"
+);
+
+lme_brands_test_assert(
+	'<body>1</body><body>2SIG</body>' === lme_brands_inject_html_before_body_end( '<body>1</body><body>2</body>', 'SIG' ),
+	"c'est la dernière </body> qui compte, pas la première"
+);
+
+lme_brands_test_assert(
+	'texte nuSIG' === lme_brands_inject_html_before_body_end( 'texte nu', 'SIG' )
+		&& 'texte nu' === lme_brands_inject_html_before_body_end( 'texte nu', '' ),
+	"sans </body> le fragment est ajouté à la fin ; un fragment vide ne change rien"
+);
+
+// --- Phase 3 : contrôle de fuite d'une marque dans le message d'une autre ---------
+
+echo "\nlme_brands_foreign_brand_tokens() et lme_brands_find_foreign_tokens()\n";
+
+$foreign = lme_brands_foreign_brand_tokens( $config, 'sexcaperoom' );
+
+lme_brands_test_assert(
+	in_array( "L'Instant Clé", $foreign, true )
+		&& in_array( 'linstantcle.ch', $foreign, true )
+		&& in_array( 'reservations@linstantcle.ch', $foreign, true )
+		&& ! in_array( 'Sexcape Room', $foreign, true ),
+	"les termes étrangers d'un message Sexcape Room sont ceux de L'Instant Clé, et pas les siens"
+);
+
+lme_brands_test_assert(
+	array() === lme_brands_foreign_brand_tokens( array( 'brands' => array() ), 'sexcaperoom' ),
+	"un registre sans autre marque n'a rien d'étranger à signaler"
+);
+
+lme_brands_test_assert(
+	array( "L'Instant Clé" ) === lme_brands_find_foreign_tokens( '<p>Merci de votre séjour à L&#039;Instant Clé.</p>', array( "L'Instant Clé" ) ),
+	"une apostrophe encodée en entité HTML ne fait pas échouer le contrôle"
+);
+
+lme_brands_test_assert(
+	array( "L'Instant Clé" ) === lme_brands_find_foreign_tokens( "<p>L\xE2\x80\x99Instant Clé</p>", array( "L'Instant Clé" ) ),
+	"une apostrophe typographique non plus"
+);
+
+lme_brands_test_assert(
+	array( 'linstantcle.ch' ) === lme_brands_find_foreign_tokens( '<img src="https://LINSTANTCLE.CH/x.jpg">', array( 'linstantcle.ch' ) ),
+	"la recherche d'un hôte est insensible à la casse"
+);
+
+lme_brands_test_assert(
+	array() === lme_brands_find_foreign_tokens( '<p>Sexcape Room</p>', array( "L'Instant Clé", 'linstantcle.ch' ) ),
+	'un message propre ne déclenche rien'
+);
+
+// --- Phase 3 : identité posée sur le message --------------------------------------
+
+echo "\nlme_brands_mail_identity()\n";
+
+$sexcape = lme_brands_mail_identity( $config, lme_brands_resolve_brand_for_rooms( $config, array( 10 ) ), 'fr-FR' );
+
+lme_brands_test_assert(
+	'sexcaperoom' === $sexcape['brand_key']
+		&& 'reservations@sexcaperoom.ch' === $sexcape['sender_email']
+		&& 'Sexcape Room' === $sexcape['sender_name']
+		&& 'reservations@sexcaperoom.ch' === $sexcape['reply_to']
+		&& 'Votre réservation — Sexcape Room' === $sexcape['subject'],
+	"une réservation de la chambre 10 en français prend l'identité Sexcape Room de bout en bout"
+);
+
+lme_brands_test_assert(
+	$sexcape['sender_email'] !== $sexcape['sender_name'],
+	"adresse et nom d'expéditeur diffèrent : sans quoi VBOMailWrapper efface le nom et se replie sur le titre global du site"
+);
+
+$sexcape_de = lme_brands_mail_identity( $config, lme_brands_resolve_brand_for_rooms( $config, array( 10 ) ), 'de-DE' );
+
+lme_brands_test_assert(
+	'Votre réservation — Sexcape Room' === $sexcape_de['subject'],
+	"une réservation allemande d'une marque qui ne déclare que le français prend l'objet français de cette marque, jamais l'objet natif de Vik"
+);
+
+$lic = lme_brands_mail_identity( $config, lme_brands_resolve_brand_for_rooms( $config, array( 1 ) ), 'en-US' );
+
+lme_brands_test_assert(
+	'linstantcle' === $lic['brand_key'] && null === $lic['subject'],
+	"une marque sans table d'objets laisse l'objet natif de Vik intact"
+);
+
+$undetermined = lme_brands_mail_identity( $config, lme_brands_resolve_brand_for_rooms( $config, array( 1, 4 ) ), 'fr-FR' );
+
+lme_brands_test_assert(
+	null === $undetermined['brand_key']
+		&& 'Réservations' === $undetermined['sender_name']
+		&& null === $undetermined['sender_email']
+		&& null === $undetermined['reply_to']
+		&& 'Votre réservation' === $undetermined['subject']
+		&& array() === $undetermined['replacements']
+		&& null === $undetermined['signature_html'],
+	"une marque indéterminée prend l'identité neutre : aucun nom de marque, et l'adresse de Vik conservée plutôt qu'une adresse inventée"
+);
+
+lme_brands_test_assert(
+	array() === $undetermined['foreign_tokens'],
+	"marque inconnue, donc rien à déclarer étranger : on ne contrôle pas ce qu'on ne sait pas"
+);
+
+$undetermined_en = lme_brands_mail_identity( $config, lme_brands_resolve_brand_for_rooms( $config, array( 3 ) ), 'en-US' );
+
+lme_brands_test_assert(
+	'Your reservation' === $undetermined_en['subject'],
+	"l'objet neutre suit la langue de la réservation"
+);
+
+// --- Phase 3 : le registre refuse les formes qui produiraient la mauvaise marque ---
+
+echo "\nvalidate_config(), contrôles ajoutés par la phase 3\n";
+
+$no_neutral = lme_brands_test_sample_config();
+unset( $no_neutral['neutral'] );
+
+lme_brands_test_assert(
+	1 === count( lme_brands_validate_config( $no_neutral ) ),
+	"un registre sans identité neutre est invalide : sans elle, une marque indéterminée partirait sous l'expéditeur global"
+);
+
+$same_sender = lme_brands_test_sample_config();
+$same_sender['brands']['sexcaperoom']['sender_name'] = $same_sender['brands']['sexcaperoom']['sender_email'];
+
+lme_brands_test_assert(
+	1 === count( lme_brands_validate_config( $same_sender ) ),
+	'un nom d\'expéditeur identique à l\'adresse est refusé — piège de VBOMailWrapper::setSender()'
+);
+
+$bad_subject = lme_brands_test_sample_config();
+$bad_subject['brands']['sexcaperoom']['mail']['subject'] = array( 'fr' => '' );
+
+lme_brands_test_assert(
+	1 === count( lme_brands_validate_config( $bad_subject ) ),
+	'un objet vide dans mail.subject est refusé plutôt que silencieusement ignoré'
+);
+
+$bad_replacements = lme_brands_test_sample_config();
+$bad_replacements['brands']['sexcaperoom']['mail']['replacements'] = array( 'de' => array( 'x' ) );
+
+lme_brands_test_assert(
+	1 === count( lme_brands_validate_config( $bad_replacements ) ),
+	'une substitution dont le remplacement n\'est pas une chaîne est refusée'
+);
+
+$bad_neutral = lme_brands_test_sample_config();
+$bad_neutral['neutral']['sender_email'] = '';
+
+lme_brands_test_assert(
+	1 === count( lme_brands_validate_config( $bad_neutral ) ),
+	"une adresse neutre vide est refusée : null veut dire « garder celle de Vik », la chaîne vide ne veut rien dire"
+);
+
+// --- Phase 3 sur le registre réel --------------------------------------------------
+
+echo "\nPhase 3, registre réel config/brands.php\n";
+
+$real_sexcape = lme_brands_mail_identity( $real_config, lme_brands_resolve_brand_for_rooms( $real_config, array( 9 ) ), 'fr-FR' );
+
+lme_brands_test_assert(
+	'sexcaperoom' === $real_sexcape['brand_key']
+		&& is_string( $real_sexcape['subject'] ) && '' !== $real_sexcape['subject']
+		&& false === stripos( $real_sexcape['subject'], 'instant' ),
+	"registre réel : une réservation de L'Indécent prend un objet Sexcape Room, qui ne nomme pas L'Instant Clé"
+);
+
+lme_brands_test_assert(
+	in_array( 'linstantcle.ch', $real_sexcape['foreign_tokens'], true ),
+	"registre réel : le contrôle de fuite d'un message Sexcape Room surveille bien l'hôte linstantcle.ch"
+);
+
+$real_neutral = lme_brands_mail_identity( $real_config, lme_brands_resolve_brand_for_rooms( $real_config, array( 999 ) ), null );
+
+lme_brands_test_assert(
+	null === $real_neutral['brand_key']
+		&& false === stripos( $real_neutral['sender_name'], 'instant' )
+		&& false === stripos( $real_neutral['sender_name'], 'sexcape' )
+		&& false === stripos( (string) $real_neutral['subject'], 'instant' )
+		&& false === stripos( (string) $real_neutral['subject'], 'sexcape' ),
+	'registre réel : une chambre inconnue produit une identité qui ne nomme aucune des deux marques'
 );
 
 // --- Résultat -------------------------------------------------------------------

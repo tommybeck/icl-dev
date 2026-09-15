@@ -78,6 +78,25 @@ function lme_brands_validate_config( $config ) {
 				$seen_hosts[ $host_key ] = $brand_key;
 			}
 		}
+
+		// Piège relevé dans VBOMailWrapper::setSender() (wrapper.php:182,
+		// constat-phase-0.md Q2) : `'name' => $address != $name ? $name : null`.
+		// Passer la même chaîne comme adresse et comme nom fait disparaître le
+		// nom, et VBOMailWrapper::getSenderName() se replie alors sur
+		// VikBooking::getFrontTitle(), c'est-à-dire le titre global de
+		// l'installation — donc le nom de l'autre marque. Une égalité ici ne
+		// produirait pas un nom manquant, elle produirait la mauvaise marque.
+		if ( ! empty( $brand['sender_email'] ) && is_string( $brand['sender_email'] )
+			&& ! empty( $brand['sender_name'] ) && is_string( $brand['sender_name'] )
+			&& $brand['sender_email'] === $brand['sender_name'] ) {
+			$errors[] = "La marque '{$brand_key}' a le même 'sender_email' et 'sender_name' : VBOMailWrapper effacerait le nom et se replierait sur le titre global du site.";
+		}
+
+		if ( array_key_exists( 'mail', $brand ) ) {
+			foreach ( lme_brands_validate_brand_mail( $brand_key, $brand['mail'] ) as $mail_error ) {
+				$errors[] = $mail_error;
+			}
+		}
 	}
 
 	if ( ! isset( $config['rooms'] ) || ! is_array( $config['rooms'] ) ) {
@@ -114,6 +133,107 @@ function lme_brands_validate_config( $config ) {
 
 		if ( array_key_exists( 'availability_group', $room ) && null !== $room['availability_group'] && ( ! is_string( $room['availability_group'] ) || '' === $room['availability_group'] ) ) {
 			$errors[] = "La chambre #{$room_id} a un 'availability_group' invalide (doit être une chaîne non vide ou null).";
+		}
+	}
+
+	foreach ( lme_brands_validate_neutral( isset( $config['neutral'] ) ? $config['neutral'] : null ) as $neutral_error ) {
+		$errors[] = $neutral_error;
+	}
+
+	return $errors;
+}
+
+/**
+ * Valide le bloc `mail` optionnel d'une marque. Chapitre 4.4 du brief.
+ *
+ * @param string $brand_key
+ * @param mixed  $mail
+ * @return string[]
+ */
+function lme_brands_validate_brand_mail( $brand_key, $mail ) {
+	$errors = array();
+
+	if ( ! is_array( $mail ) ) {
+		return array( "La marque '{$brand_key}' a un bloc 'mail' qui n'est pas un tableau." );
+	}
+
+	if ( array_key_exists( 'subject', $mail ) ) {
+		if ( ! is_array( $mail['subject'] ) ) {
+			$errors[] = "La marque '{$brand_key}' a un 'mail.subject' qui n'est pas une table langue => objet.";
+		} else {
+			foreach ( $mail['subject'] as $lang => $subject ) {
+				if ( ! is_string( $lang ) || '' === $lang || ! is_string( $subject ) || '' === $subject ) {
+					$errors[] = "La marque '{$brand_key}' a une entrée invalide dans 'mail.subject'.";
+					break;
+				}
+			}
+		}
+	}
+
+	if ( array_key_exists( 'replacements', $mail ) ) {
+		if ( ! is_array( $mail['replacements'] ) ) {
+			$errors[] = "La marque '{$brand_key}' a un 'mail.replacements' qui n'est pas un tableau.";
+		} else {
+			foreach ( $mail['replacements'] as $from => $to ) {
+				if ( ! is_string( $from ) || '' === $from || ! is_string( $to ) ) {
+					$errors[] = "La marque '{$brand_key}' a une substitution invalide dans 'mail.replacements' (clé et valeur doivent être des chaînes, la clé non vide).";
+					break;
+				}
+			}
+		}
+	}
+
+	if ( array_key_exists( 'signature_html', $mail ) && null !== $mail['signature_html']
+		&& ( ! is_string( $mail['signature_html'] ) || '' === $mail['signature_html'] ) ) {
+		$errors[] = "La marque '{$brand_key}' a un 'mail.signature_html' invalide (chaîne non vide ou null).";
+	}
+
+	return $errors;
+}
+
+/**
+ * Valide l'identité neutre, obligatoire.
+ *
+ * Elle l'est parce que sans elle, une marque indéterminée n'aurait pas
+ * d'expéditeur à porter et le message partirait sous l'expéditeur global de
+ * l'installation, c'est-à-dire potentiellement sous la mauvaise marque — ce
+ * que le §4.4 du brief interdit sans exception.
+ *
+ * @param mixed $neutral
+ * @return string[]
+ */
+function lme_brands_validate_neutral( $neutral ) {
+	$errors = array();
+
+	if ( ! is_array( $neutral ) ) {
+		return array( "Le registre ne définit aucune identité neutre (clé 'neutral' manquante ou invalide)." );
+	}
+
+	foreach ( array( 'label', 'sender_name' ) as $field ) {
+		if ( empty( $neutral[ $field ] ) || ! is_string( $neutral[ $field ] ) ) {
+			$errors[] = "L'identité neutre n'a pas de champ '{$field}' valide.";
+		}
+	}
+
+	foreach ( array( 'sender_email', 'reply_to' ) as $field ) {
+		if ( ! array_key_exists( $field, $neutral ) ) {
+			$errors[] = "L'identité neutre n'a pas de champ '{$field}' (null accepté, absent non).";
+			continue;
+		}
+
+		if ( null !== $neutral[ $field ] && ( ! is_string( $neutral[ $field ] ) || '' === $neutral[ $field ] ) ) {
+			$errors[] = "L'identité neutre a un '{$field}' invalide (chaîne non vide ou null).";
+		}
+	}
+
+	if ( ! isset( $neutral['subject'] ) || ! is_array( $neutral['subject'] ) || empty( $neutral['subject'] ) ) {
+		$errors[] = "L'identité neutre n'a pas de 'subject' valide (table langue => objet, non vide).";
+	} else {
+		foreach ( $neutral['subject'] as $lang => $subject ) {
+			if ( ! is_string( $lang ) || '' === $lang || ! is_string( $subject ) || '' === $subject ) {
+				$errors[] = "L'identité neutre a une entrée invalide dans 'subject'.";
+				break;
+			}
 		}
 	}
 
@@ -386,5 +506,377 @@ function lme_brands_rate_limit_gate( array $state, $code, $now, $window_seconds 
 	return array(
 		'should_alert' => true,
 		'state'        => $state,
+	);
+}
+
+/**
+ * Destinataire visé par une itération de l'envoi de Vik, déduit de `$who`.
+ *
+ * Le hook `vikbooking_before_send_booking_mail` reçoit `$who` tel quel,
+ * c'est-à-dire un élément du tableau `$for` passé à
+ * `VikBooking::sendBookingEmail()`. Les quinze appels de cette méthode dans
+ * Vik Booking 1.8.14 et VikChannelManager ne passent jamais que `'guest'` ou
+ * `'admin'` (relevé exhaustif en §2 de docs/briefs/constat-phase-3-emails.md),
+ * donc « `$who` égal à `guest` » du brief décrit exactement le périmètre voulu.
+ *
+ * Cette fonction reproduit néanmoins la cascade de Vik lui-même
+ * (`lib.vikbooking.php:6411-6425`) plutôt que de comparer `$who` à `'guest'` :
+ * Vik reconnaît son destinataire par `strpos($who, '@')`, puis par
+ * `stripos($who, 'guest')` **ou** `stripos($who, 'customer')`. Un appelant
+ * futur qui passerait `'customer'` enverrait donc au client un message que
+ * l'égalité stricte laisserait filer — et un message non réécrit part sous
+ * l'expéditeur global de l'installation, c'est-à-dire sous une marque qui
+ * n'est peut-être pas la bonne. Suivre la cascade de Vik élargit le
+ * périmètre exactement là où Vik l'élargit, et nulle part ailleurs.
+ *
+ * L'ordre des tests est celui de Vik, et il compte : une adresse e-mail
+ * littérale contenant le mot « guest » est un destinataire personnalisé,
+ * pas le client de la réservation.
+ *
+ * @param mixed $who
+ * @return string 'custom', 'guest', 'admin' ou 'none'.
+ */
+function lme_brands_mail_audience( $who ) {
+	$who = is_string( $who ) ? $who : '';
+
+	if ( false !== strpos( $who, '@' ) ) {
+		return 'custom';
+	}
+
+	if ( false !== stripos( $who, 'guest' ) || false !== stripos( $who, 'customer' ) ) {
+		return 'guest';
+	}
+
+	if ( false !== stripos( $who, 'admin' ) ) {
+		return 'admin';
+	}
+
+	return 'none';
+}
+
+/**
+ * Résout la marque d'une réservation à partir des chambres qu'elle porte.
+ *
+ * Le hook d'envoi ne transporte pas les identifiants de chambre
+ * (constat-phase-0.md Q2) : l'appelant les relit dans
+ * `sir_vikbooking_ordersrooms` par `idorder`, puis passe la liste ici.
+ *
+ * Une seule issue vaut pour une marque : toutes les chambres de la
+ * réservation résolvent, et elles résolvent vers la même marque. Tout le
+ * reste est indéterminé, jamais une marque devinée sur la première chambre
+ * venue — §4.4 du brief, « jamais sous la mauvaise marque ».
+ *
+ * Le cas `mixed_brands` n'est pas théorique : la garde de réservation
+ * (includes/booking-guard.php) interdit qu'une réservation du tunnel mêle
+ * deux marques, mais rien n'interdit à Thomas de composer une telle
+ * réservation dans l'administration de Vik.
+ *
+ * @param array $config
+ * @param array $room_ids Identifiants de chambre Vik.
+ * @return array{status: string, reason: string, brand_key: string|null, room_ids: int[], brand_keys: string[], unknown_rooms: int[]}
+ */
+function lme_brands_resolve_brand_for_rooms( array $config, array $room_ids ) {
+	$ids = array();
+	foreach ( $room_ids as $room_id ) {
+		$ids[] = (int) $room_id;
+	}
+	$ids = array_values( array_unique( $ids ) );
+
+	$result = array(
+		'status'        => 'undetermined',
+		'reason'        => 'no_rooms',
+		'brand_key'     => null,
+		'room_ids'      => $ids,
+		'brand_keys'    => array(),
+		'unknown_rooms' => array(),
+	);
+
+	if ( empty( $ids ) ) {
+		return $result;
+	}
+
+	$brand_keys = array();
+
+	foreach ( $ids as $room_id ) {
+		$resolved = lme_brands_resolve_room( $config, $room_id );
+
+		if ( 'ok' !== $resolved['status'] ) {
+			$result['unknown_rooms'][] = $room_id;
+			continue;
+		}
+
+		$brand_keys[ $resolved['brand_key'] ] = true;
+	}
+
+	$result['brand_keys'] = array_keys( $brand_keys );
+
+	if ( ! empty( $result['unknown_rooms'] ) ) {
+		$result['reason'] = 'unknown_room';
+		return $result;
+	}
+
+	if ( count( $result['brand_keys'] ) > 1 ) {
+		$result['reason'] = 'mixed_brands';
+		return $result;
+	}
+
+	$result['status']    = 'ok';
+	$result['reason']    = '';
+	$result['brand_key'] = $result['brand_keys'][0];
+
+	return $result;
+}
+
+/**
+ * Ramène une étiquette de langue à son code primaire en minuscules.
+ *
+ * `sir_vikbooking_orders.lang` porte des étiquettes complètes : relevé du
+ * 15 septembre 2026 sur les 1758 réservations de la base, `fr-FR`, `de-CH`,
+ * `en-US`, `de-DE`, et NULL sur 157 d'entre elles. Le registre, lui,
+ * déclare des codes primaires (`fr`, `en`). C'est ici que les deux se
+ * rejoignent, et nulle part ailleurs.
+ *
+ * @param mixed $tag
+ * @return string|null
+ */
+function lme_brands_normalize_language_tag( $tag ) {
+	if ( ! is_string( $tag ) ) {
+		return null;
+	}
+
+	$tag = strtolower( trim( $tag ) );
+
+	if ( '' === $tag ) {
+		return null;
+	}
+
+	// 'fr-FR' et 'fr_FR' donnent 'fr' ; 'fr' reste 'fr'.
+	$tag = preg_replace( '/[^a-z].*$/', '', $tag );
+
+	return '' === $tag ? null : $tag;
+}
+
+/**
+ * Choisit une chaîne dans une table indexée par langue.
+ *
+ * Repli assumé sur la première entrée de la table quand aucune langue
+ * préférée n'y figure : mieux vaut l'objet d'une autre langue de la **bonne**
+ * marque que l'objet natif de Vik, qui porte le titre global de
+ * l'installation, donc le nom de l'autre marque.
+ *
+ * @param mixed    $map       Table langue => chaîne.
+ * @param string[] $preferred Langues par ordre de préférence.
+ * @return string|null
+ */
+function lme_brands_pick_localized( $map, array $preferred ) {
+	if ( ! is_array( $map ) || empty( $map ) ) {
+		return null;
+	}
+
+	foreach ( $preferred as $lang ) {
+		if ( is_string( $lang ) && '' !== $lang && isset( $map[ $lang ] ) && is_string( $map[ $lang ] ) && '' !== $map[ $lang ] ) {
+			return $map[ $lang ];
+		}
+	}
+
+	foreach ( $map as $value ) {
+		if ( is_string( $value ) && '' !== $value ) {
+			return $value;
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Applique une table de substitutions littérales, dans l'ordre de
+ * déclaration. Une valeur de remplacement vide supprime le terme cherché.
+ *
+ * @param mixed $text
+ * @param mixed $replacements Table « terme cherché » => « remplacement ».
+ * @return string
+ */
+function lme_brands_apply_text_replacements( $text, $replacements ) {
+	$text = (string) $text;
+
+	if ( ! is_array( $replacements ) ) {
+		return $text;
+	}
+
+	foreach ( $replacements as $from => $to ) {
+		if ( ! is_string( $from ) || '' === $from || ! is_string( $to ) ) {
+			continue;
+		}
+
+		$text = str_replace( $from, $to, $text );
+	}
+
+	return $text;
+}
+
+/**
+ * Termes qui trahiraient une autre marque dans un message écrit pour
+ * celle-ci. Dérivés du registre, jamais tenus dans une seconde liste :
+ * ajouter une marque suffit à étendre le contrôle.
+ *
+ * @param array       $config
+ * @param string|null $brand_key Marque du message ; null n'exclut rien.
+ * @return string[]
+ */
+function lme_brands_foreign_brand_tokens( array $config, $brand_key ) {
+	$tokens = array();
+	$brands = isset( $config['brands'] ) && is_array( $config['brands'] ) ? $config['brands'] : array();
+
+	foreach ( $brands as $key => $brand ) {
+		if ( $key === $brand_key || ! is_array( $brand ) ) {
+			continue;
+		}
+
+		foreach ( array( 'label', 'host', 'sender_email' ) as $field ) {
+			if ( ! empty( $brand[ $field ] ) && is_string( $brand[ $field ] ) ) {
+				$tokens[] = $brand[ $field ];
+			}
+		}
+	}
+
+	return array_values( array_unique( $tokens ) );
+}
+
+/**
+ * Normalise un texte avant recherche : entités HTML décodées, apostrophes
+ * typographiques ramenées à l'apostrophe droite.
+ *
+ * Sans cela, chercher « L'Instant Clé » dans un corps HTML échoue : le nom
+ * y apparaît le plus souvent en `L&#039;Instant Clé` ou en `L’Instant Clé`,
+ * et le contrôle de fuite déclarerait le message propre alors qu'il ne l'est
+ * pas. Le silence d'un contrôle raté est pire que l'absence de contrôle.
+ *
+ * @param mixed $text
+ * @return string
+ */
+function lme_brands_normalize_for_search( $text ) {
+	$text = html_entity_decode( (string) $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+
+	return str_replace(
+		array( "\xE2\x80\x99", "\xE2\x80\x98", "\xC2\xB4", '`' ),
+		"'",
+		$text
+	);
+}
+
+/**
+ * Termes d'une autre marque effectivement présents dans un texte.
+ *
+ * @param mixed    $haystack
+ * @param string[] $tokens
+ * @return string[] Les termes trouvés, dans leur forme d'origine.
+ */
+function lme_brands_find_foreign_tokens( $haystack, array $tokens ) {
+	$haystack = lme_brands_normalize_for_search( $haystack );
+	$found    = array();
+
+	foreach ( $tokens as $token ) {
+		if ( ! is_string( $token ) || '' === $token ) {
+			continue;
+		}
+
+		if ( false !== stripos( $haystack, lme_brands_normalize_for_search( $token ) ) ) {
+			$found[] = $token;
+		}
+	}
+
+	return $found;
+}
+
+/**
+ * Insère un fragment juste avant la dernière balise `</body>`, ou à la fin
+ * du document s'il n'y en a pas. Vik enveloppe le corps parsé dans un
+ * document HTML complet (`lib.vikbooking.php:6388`) : ajouter après
+ * `</html>` produirait un fragment que certains clients de messagerie
+ * n'affichent pas.
+ *
+ * @param mixed $html
+ * @param mixed $fragment
+ * @return string
+ */
+function lme_brands_inject_html_before_body_end( $html, $fragment ) {
+	$html = (string) $html;
+
+	if ( ! is_string( $fragment ) || '' === $fragment ) {
+		return $html;
+	}
+
+	$pos = strripos( $html, '</body>' );
+
+	if ( false === $pos ) {
+		return $html . $fragment;
+	}
+
+	return substr( $html, 0, $pos ) . $fragment . substr( $html, $pos );
+}
+
+/**
+ * Identité à poser sur un message client, à partir de la marque résolue.
+ *
+ * Fonction pure : elle décide, elle n'écrit rien. C'est
+ * includes/mail-brand.php qui applique le résultat aux mutateurs de
+ * `VBOMailWrapper`.
+ *
+ * Marque indéterminée : l'identité neutre du registre, jamais celle d'une
+ * marque. `sender_email` et `reply_to` valant null signifient « garder ce
+ * que Vik a posé » — l'adresse configurée pour toute l'installation —, parce
+ * qu'inventer une adresse qui n'existe pas ferait rebondir la réponse du
+ * client. Seul le nom affiché, l'objet et le contenu cessent alors de
+ * nommer une marque.
+ *
+ * @param array       $config
+ * @param array       $resolution   Sortie de lme_brands_resolve_brand_for_rooms().
+ * @param mixed       $booking_lang `sir_vikbooking_orders.lang`, brut.
+ * @return array{brand_key: string|null, label: string, sender_email: string|null, sender_name: string, reply_to: string|null, subject: string|null, replacements: array, signature_html: string|null, foreign_tokens: string[]}
+ */
+function lme_brands_mail_identity( array $config, array $resolution, $booking_lang ) {
+	$lang      = lme_brands_normalize_language_tag( $booking_lang );
+	$preferred = null === $lang ? array() : array( $lang );
+
+	if ( ! isset( $resolution['status'] ) || 'ok' !== $resolution['status'] ) {
+		$neutral = isset( $config['neutral'] ) && is_array( $config['neutral'] ) ? $config['neutral'] : array();
+
+		return array(
+			'brand_key'      => null,
+			'label'          => isset( $neutral['label'] ) && is_string( $neutral['label'] ) ? $neutral['label'] : '',
+			'sender_email'   => ( isset( $neutral['sender_email'] ) && is_string( $neutral['sender_email'] ) && '' !== $neutral['sender_email'] ) ? $neutral['sender_email'] : null,
+			'sender_name'    => isset( $neutral['sender_name'] ) && is_string( $neutral['sender_name'] ) ? $neutral['sender_name'] : '',
+			'reply_to'       => ( isset( $neutral['reply_to'] ) && is_string( $neutral['reply_to'] ) && '' !== $neutral['reply_to'] ) ? $neutral['reply_to'] : null,
+			'subject'        => lme_brands_pick_localized( isset( $neutral['subject'] ) ? $neutral['subject'] : array(), $preferred ),
+			'replacements'   => array(),
+			'signature_html' => null,
+			// Marque inconnue : on ne sait pas ce qui serait « étranger ».
+			'foreign_tokens' => array(),
+		);
+	}
+
+	$brand_key = $resolution['brand_key'];
+	$brand     = $config['brands'][ $brand_key ];
+	$mail_cfg  = isset( $brand['mail'] ) && is_array( $brand['mail'] ) ? $brand['mail'] : array();
+
+	if ( isset( $brand['languages'] ) && is_array( $brand['languages'] ) ) {
+		foreach ( $brand['languages'] as $declared ) {
+			$declared = lme_brands_normalize_language_tag( $declared );
+			if ( null !== $declared && ! in_array( $declared, $preferred, true ) ) {
+				$preferred[] = $declared;
+			}
+		}
+	}
+
+	return array(
+		'brand_key'      => $brand_key,
+		'label'          => $brand['label'],
+		'sender_email'   => $brand['sender_email'],
+		'sender_name'    => $brand['sender_name'],
+		'reply_to'       => $brand['reply_to'],
+		'subject'        => lme_brands_pick_localized( isset( $mail_cfg['subject'] ) ? $mail_cfg['subject'] : array(), $preferred ),
+		'replacements'   => ( isset( $mail_cfg['replacements'] ) && is_array( $mail_cfg['replacements'] ) ) ? $mail_cfg['replacements'] : array(),
+		'signature_html' => ( isset( $mail_cfg['signature_html'] ) && is_string( $mail_cfg['signature_html'] ) && '' !== $mail_cfg['signature_html'] ) ? $mail_cfg['signature_html'] : null,
+		'foreign_tokens' => lme_brands_foreign_brand_tokens( $config, $brand_key ),
 	);
 }
