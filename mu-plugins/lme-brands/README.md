@@ -125,18 +125,18 @@ Deux couches, parce que Vik n'expose qu'un seul vrai point d'accroche de présen
 
 ### Couche de garde, `includes/booking-guard.php`
 
-**Le seul mécanisme réellement opposable.** Greffée sur `vikbooking_before_create_booking_record`, qui se déclenche juste avant l'insertion de la commande. Pour chaque chambre de la réservation en cours de création :
+**Le seul mécanisme réellement opposable.** Greffée sur `vikbooking_before_create_booking_record`, qui se déclenche juste avant l'insertion de la commande. Pour chaque chambre de la réservation en cours de création, dans cet ordre (chapitre 2 du brief-correctif-phase-2-suite.md) :
 
-- chambre désactivée dans Vik (`avail = 0`) : **refusée sans condition, quelle que soit sa marque** — journalisée en erreur (`unavailable_room_booking_attempt`). C'est le cas des chambres de test 5 et 6 en dehors de leur fenêtre de test (chapitre 5 du brief-correctif-phase-2-filtrage.md) ;
+- chambre désactivée dans Vik (`avail = 0`) : **refusée sans condition, quelle que soit sa marque, y compris sur un hôte qui ne résout vers aucune marque du registre** — journalisée en erreur (`unavailable_room_booking_attempt`). C'est le cas des chambres de test 5 et 6 en dehors de leur fenêtre de test (chapitre 5 du brief-correctif-phase-2-filtrage.md). Ce refus précède la résolution de marque : une chambre désactivée l'est partout, cette décision ne demande aucune marque pour être prise ;
 - chambre active, marque de l'hôte : autorisée ;
 - chambre active, autre marque : **refusée**, journalisée en erreur et alertée (`foreign_room_booking_attempt` — le troisième cas que le chapitre 6 exige d'alerter sans exception) ;
 - chambre absente du registre : **refusée**, déjà journalisée en erreur et alertée par `lme_brands_resolve_room_or_log()` (`unknown_room` — le premier cas du chapitre 6).
 
-Le message et le titre de refus sortent dans la langue de la marque de l'hôte courant (première langue déclarée dans `languages`), pas systématiquement en français : voir `lme_brands_rejection_strings()`, chapitre 7 du brief-correctif-phase-2-filtrage.md.
+Ces trois derniers cas ne s'appliquent que si l'hôte résout vers une marque : sur un hôte qui n'est celui d'aucune marque du registre (staging, accès direct par IP), seul le refus sur `avail = 0` reste opposable, faute de contexte de marque à faire respecter — et on ne devine jamais une marque.
+
+Le message et le titre de refus sortent dans la langue de la marque de l'hôte courant (première langue déclarée dans `languages`), pas systématiquement en français : voir `lme_brands_rejection_strings()`, chapitre 7 du brief-correctif-phase-2-filtrage.md. Sur un hôte sans marque, le message se replie sur le français.
 
 Refuser arrête la requête sur place (`wp_die()`, réponse 403) : `vikbooking_before_create_booking_record` est un `do_action_ref_array` ordinaire (`constat-phase-0.md` Q2), il ne peut pas annuler l'insertion par une valeur de retour. Sans cet arrêt immédiat, le contrôleur de Vik atteindrait `$dbo->insertObject()` quelques lignes plus bas, qu'on le veuille ou non.
-
-Un hôte qui n'est celui d'aucune marque du registre (staging, accès direct par IP) désactive la garde entière, y compris le refus sur `avail = 0` : aucun contexte de marque à faire respecter, et on ne devine jamais une marque.
 
 ---
 
@@ -158,7 +158,9 @@ php mu-plugins/lme-brands/tests/test-core.php
 
 Sortie : une ligne par test, un total, et un code de sortie non nul si un test échoue. Le dernier bloc de tests recharge `config/brands.php` lui-même et vérifie qu'il est valide et fidèle à la carte de vérité du chapitre 2 — une régression dans le fichier de configuration réel casse ces tests, pas seulement les tests sur un registre d'exemple.
 
-**Aucun `php` n'était disponible sur ce poste au moment d'écrire ce plugin, ni encore au moment d'écrire la phase 2** : ces tests n'ont donc pas pu être exécutés ici, sur aucune des deux phases. Les faire tourner une première fois avant la phase 3 fait partie de la recette de cette phase 2 — la phase 2 ajoute `lme_brands_parse_id_list()`, `lme_brands_extract_room_ids()` et `lme_brands_room_ids_matching_category()` à `includes/core.php`, chacune couverte par de nouveaux tests, et n'a pas pu vérifier davantage que l'équilibrage des accolades et des parenthèses (`grep -o` de chaque fichier, à défaut d'un interpréteur).
+**Aucun `php` n'était disponible sur ce poste au moment d'écrire ce plugin, ni encore au moment d'écrire la phase 2** : ces tests n'ont donc pas pu être exécutés ici, sur aucune des deux phases. La phase 2 ajoute `lme_brands_parse_id_list()`, `lme_brands_extract_room_ids()` et `lme_brands_room_ids_matching_category()` à `includes/core.php`, chacune couverte par de nouveaux tests, et n'avait pas pu vérifier davantage que l'équilibrage des accolades et des parenthèses (`grep -o` de chaque fichier, à défaut d'un interpréteur).
+
+`php` est disponible depuis le correctif de phase 2, suite (15 septembre 2026) : les 52 tests passent, y compris ceux d'`evaluate_booking_room()`, laissée inchangée par ce correctif — seul l'ordre dans `lme_brands_guard_booking_record()`, non couverte par ces tests car elle appelle des fonctions WordPress, a changé.
 
 `includes/logger.php`, `includes/registry.php`, `includes/url-rewrite.php`, `includes/room-filter.php`, `includes/booking-guard.php` et `includes/health-screen.php` appellent des fonctions WordPress (`get_option`, `add_filter`, `add_action`, `$wpdb`, `is_admin`, `wp_die`...) et n'ont pas d'équivalent testable hors WordPress dans ce dépôt. Les vérifier suit les procédures manuelles ci-dessous, sur `staging10.linstantcle.ch` de préférence, jamais en production.
 
@@ -250,6 +252,7 @@ Sur `staging10.linstantcle.ch`, jamais en production, avec un mode de paiement h
 4. Sans rien changer dans Vik, tenter de réserver la chambre de test 5 (ou 6) depuis son propre hôte de marque (linstantcle.ch pour la 5, reservation.sexcaperoom.ch pour la 6) : la réservation doit être **refusée**, `debug.log` doit porter une ligne `[lme-brands] [ERROR] [unavailable_room_booking_attempt]`, et l'alerte doit se déclencher — la chambre est désactivée (`avail = 0`) en dehors de sa fenêtre de test E5.
 5. Activer temporairement la chambre 5 dans Vik (`avail = 1`), réserver depuis `linstantcle.ch` : la réservation doit aboutir normalement, sans refus. Désactiver la chambre aussitôt après, **y compris si le test précédent avait échoué** (chapitre 5 du brief-correctif-phase-2-filtrage.md : aucun chemin d'échec ne doit laisser la chambre active).
 6. Réserver une chambre légitime pour chaque hôte (ex. chambre 8 sur `linstantcle.ch`, chambre 4 sur `reservation.sexcaperoom.ch`) : la réservation doit aboutir normalement, sans qu'aucune ligne `lme-brands` n'apparaisse dans `debug.log`.
+7. Sur `staging10.linstantcle.ch` lui-même — hôte qui ne résout vers aucune marque du registre (chapitre 2 du brief-correctif-phase-2-suite.md) — tenter de réserver la chambre de test 5 (ou 6), désactivée hors de sa fenêtre de test : la réservation doit être **refusée**, `debug.log` doit porter une ligne `[lme-brands] [ERROR] [unavailable_room_booking_attempt]`, et le message de refus sort en français (repli, faute de marque à résoudre). Réserver ensuite une chambre active quelconque depuis ce même hôte : la réservation doit aboutir normalement — l'absence de marque ne bloque que les chambres désactivées, rien d'autre.
 
 ---
 

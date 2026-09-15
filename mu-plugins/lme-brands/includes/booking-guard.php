@@ -42,24 +42,16 @@ add_action( 'vikbooking_before_create_booking_record', 'lme_brands_guard_booking
 function lme_brands_guard_booking_record( $booking_record, $rooms, $tars, $selopt, $arrpeople ) {
 	$expected_brand = lme_brands_current_request_brand_key();
 
-	if ( null === $expected_brand ) {
-		// Hôte qui n'est celui d'aucune marque du registre (staging, accès
-		// direct par IP...) : aucun contexte de marque à faire respecter.
-		// On ne devine jamais une marque, y compris ici.
-		return;
-	}
-
 	foreach ( lme_brands_extract_room_ids( $rooms ) as $room_id ) {
 		$available = lme_brands_room_is_available( $room_id );
-		$resolved  = lme_brands_resolve_room_or_log( $room_id );
-		$outcome   = lme_brands_evaluate_booking_room( $resolved, $available, $expected_brand );
 
-		if ( 'allow' === $outcome ) {
-			continue;
-		}
-
-		if ( 'refuse_unavailable' === $outcome ) {
-			// Chapitre 5 du brief-correctif-phase-2-filtrage.md : une chambre
+		if ( false === $available ) {
+			// Chapitre 2 du brief-correctif-phase-2-suite.md : ce refus
+			// précède la résolution de marque et s'applique même sur un
+			// hôte qui ne résout vers aucune marque (staging, accès direct
+			// par IP...) — une chambre désactivée l'est partout, cette
+			// décision ne demande aucune marque pour être prise. Chapitre 5
+			// du brief-correctif-phase-2-filtrage.md : une chambre
 			// désactivée dans Vik (avail = 0) est refusée sans condition,
 			// quelle que soit sa marque.
 			lme_brands_log(
@@ -71,7 +63,25 @@ function lme_brands_guard_booking_record( $booking_record, $rooms, $tars, $selop
 				),
 				array( 'room_id' => $room_id )
 			);
-		} elseif ( 'refuse_foreign_brand' === $outcome ) {
+			lme_brands_reject_booking_attempt();
+		}
+
+		if ( null === $expected_brand ) {
+			// Hôte qui n'est celui d'aucune marque du registre : aucun
+			// contexte de marque à faire respecter pour cette chambre, qui
+			// est active (le cas ci-dessus l'aurait déjà arrêtée). On ne
+			// devine jamais une marque, y compris ici.
+			continue;
+		}
+
+		$resolved = lme_brands_resolve_room_or_log( $room_id );
+		$outcome  = lme_brands_evaluate_booking_room( $resolved, $available, $expected_brand );
+
+		if ( 'allow' === $outcome ) {
+			continue;
+		}
+
+		if ( 'refuse_foreign_brand' === $outcome ) {
 			// Chambre connue, mais d'une autre marque que l'hôte de la
 			// requête : c'est exactement le troisième cas que le chapitre 6
 			// du brief exige d'alerter sans exception, « tentative de
