@@ -114,8 +114,21 @@ function lme_brands_test_sample_config() {
 				'forfait'            => null,
 				'availability_group' => null,
 			),
+			5  => array(
+				'brand'              => 'linstantcle',
+				'name'               => 'Chambre de test (clone Cinéma)',
+				'experience'         => 'Chambre de test',
+				'forfait'            => null,
+				'availability_group' => null,
+			),
+			6  => array(
+				'brand'              => 'sexcaperoom',
+				'name'               => 'Chambre de test (clone Maisonnette)',
+				'experience'         => 'Chambre de test',
+				'forfait'            => null,
+				'availability_group' => null,
+			),
 		),
-		'excluded_room_ids' => array( 5, 6 ),
 	);
 }
 
@@ -135,10 +148,6 @@ $broken['rooms'][99]   = array(
 	'experience' => 'X',
 );
 lme_brands_test_assert( count( lme_brands_validate_config( $broken ) ) > 0, 'validate_config : signale une chambre pointant vers une marque inconnue' );
-
-$broken                       = $config;
-$broken['excluded_room_ids'][] = 1; // chevauche une chambre déjà vendue.
-lme_brands_test_assert( count( lme_brands_validate_config( $broken ) ) > 0, 'validate_config : signale un chevauchement entre rooms et excluded_room_ids' );
 
 $broken                                         = $config;
 $broken['brands']['sexcaperoom']['host']        = 'linstantcle.ch'; // doublon d'hôte.
@@ -169,10 +178,16 @@ $resolved = lme_brands_resolve_room( $config, 1 );
 lme_brands_test_assert( null === $resolved['forfait'], "resolve_room : la chambre 1 n'a pas de forfait" );
 
 $resolved = lme_brands_resolve_room( $config, 5 );
-lme_brands_test_assert( 'excluded' === $resolved['status'], 'resolve_room : la chambre de test 5 est exclue, pas inconnue' );
+lme_brands_test_assert(
+	'ok' === $resolved['status'] && 'linstantcle' === $resolved['brand_key'],
+	"resolve_room : la chambre de test 5 résout vers linstantcle, comme n'importe quelle chambre déclarée"
+);
 
 $resolved = lme_brands_resolve_room( $config, 6 );
-lme_brands_test_assert( 'excluded' === $resolved['status'], 'resolve_room : la chambre de test 6 est exclue, pas inconnue' );
+lme_brands_test_assert(
+	'ok' === $resolved['status'] && 'sexcaperoom' === $resolved['brand_key'],
+	"resolve_room : la chambre de test 6 résout vers sexcaperoom, comme n'importe quelle chambre déclarée"
+);
 
 $resolved = lme_brands_resolve_room( $config, 3 );
 lme_brands_test_assert( 'unknown' === $resolved['status'], 'resolve_room : une chambre absente du registre est inconnue' );
@@ -302,16 +317,29 @@ lme_brands_test_assert(
 );
 
 // --- lme_brands_room_ids_matching_category -------------------------------------
+//
+// Carte alignée sur la production, relevée le 14 septembre 2026
+// (brief-correctif-phase-2-filtrage.md, chapitre 8) : la catégorie 1 contient
+// aussi la chambre 5, celle qui déclenchait le défaut du chapitre 2 — un
+// jeu d'essai qui ne la contenait pas ne pouvait pas l'attraper.
 
 $category_tokens = array(
-	1  => array( '1', '2' ),
-	7  => array( '1' ),
-	10 => array( '3' ),
-	2  => array( '2' ),
+	1 => array( '1' ),  // L'Entracte
+	2 => array( '1' ),  // L'Aparté
+	5 => array( '1' ),  // chambre de test, clone Cinéma
+	7 => array( '1' ),  // L'Entracte all inclusive
+	4 => array( '3' ),  // Le Boudoir du Désir
+	9 => array( '3' ),  // L'Indécent
+	8 => array( '4' ),  // La Parenthèse
+	// 6 et 10 : aucune catégorie, absentes de la carte (idcat vide dans Vik).
 );
 lme_brands_test_assert(
-	array( 1, 7 ) === lme_brands_room_ids_matching_category( $category_tokens, 1 ),
-	'room_ids_matching_category : retrouve toutes les chambres portant le jeton'
+	array( 1, 2, 5, 7 ) === lme_brands_room_ids_matching_category( $category_tokens, 1 ),
+	'room_ids_matching_category : la catégorie 1 retrouve les chambres 1, 2, 5 et 7, y compris la chambre de test'
+);
+lme_brands_test_assert(
+	array( 4, 9 ) === lme_brands_room_ids_matching_category( $category_tokens, 3 ),
+	'room_ids_matching_category : la catégorie 3 retrouve les chambres 4 et 9'
 );
 lme_brands_test_assert(
 	array() === lme_brands_room_ids_matching_category( $category_tokens, 99 ),
@@ -320,6 +348,31 @@ lme_brands_test_assert(
 lme_brands_test_assert(
 	array() === lme_brands_room_ids_matching_category( array(), 1 ),
 	'room_ids_matching_category : une carte vide donne une liste vide'
+);
+
+// --- lme_brands_evaluate_booking_room -------------------------------------------
+
+$ok_linstantcle = lme_brands_resolve_room( $config, 1 ); // brand_key 'linstantcle'.
+
+lme_brands_test_assert(
+	'allow' === lme_brands_evaluate_booking_room( $ok_linstantcle, true, 'linstantcle' ),
+	'evaluate_booking_room : chambre active, marque de l\'hôte : autorisée'
+);
+lme_brands_test_assert(
+	'refuse_unavailable' === lme_brands_evaluate_booking_room( $ok_linstantcle, false, 'linstantcle' ),
+	"evaluate_booking_room : une chambre à avail = 0 est refusée même quand sa marque correspond à l'hôte"
+);
+lme_brands_test_assert(
+	'refuse_foreign_brand' === lme_brands_evaluate_booking_room( $ok_linstantcle, true, 'sexcaperoom' ),
+	"evaluate_booking_room : chambre active, mais d'une autre marque que l'hôte : refusée"
+);
+lme_brands_test_assert(
+	'refuse_unknown_room' === lme_brands_evaluate_booking_room( lme_brands_resolve_room( $config, 3 ), true, 'linstantcle' ),
+	'evaluate_booking_room : une chambre absente du registre est refusée'
+);
+lme_brands_test_assert(
+	'refuse_unavailable' === lme_brands_evaluate_booking_room( lme_brands_resolve_room( $config, 3 ), false, 'linstantcle' ),
+	"evaluate_booking_room : l'indisponibilité est vérifiée avant même la résolution de la chambre"
 );
 
 // --- Le registre réel du dépôt est valide --------------------------------------
@@ -334,20 +387,59 @@ if ( array() !== $real_errors ) {
 }
 lme_brands_test_assert( array() === $real_errors, 'validate_config : le registre réel config/brands.php est valide' );
 
-$expected_sellable_rooms = array( 1, 2, 4, 7, 8, 9, 10 );
-$actual_sellable_rooms   = array_map( 'intval', array_keys( $real_config['rooms'] ) );
+$expected_registry_rooms = array( 1, 2, 4, 5, 6, 7, 8, 9, 10 );
+$actual_registry_rooms   = array_map( 'intval', array_keys( $real_config['rooms'] ) );
 lme_brands_test_assert(
-	array() === array_diff( $expected_sellable_rooms, $actual_sellable_rooms )
-		&& array() === array_diff( $actual_sellable_rooms, $expected_sellable_rooms ),
-	'config réel : les sept chambres vendues de la carte de vérité sont exactement celles du registre'
-);
-lme_brands_test_assert(
-	array() === array_diff( array( 5, 6 ), $real_config['excluded_room_ids'] ),
-	'config réel : les chambres de test 5 et 6 sont bien exclues'
+	array() === array_diff( $expected_registry_rooms, $actual_registry_rooms )
+		&& array() === array_diff( $actual_registry_rooms, $expected_registry_rooms ),
+	'config réel : les sept chambres vendues et les deux chambres de test sont exactement celles du registre (chapitre 2 : plus de statut exclu)'
 );
 lme_brands_test_assert(
 	'linstantcle' === $real_config['rooms'][1]['brand'] && 'sexcaperoom' === $real_config['rooms'][10]['brand'],
 	'config réel : la chambre 1 est L\'Instant Clé, la chambre 10 est Sexcape Room'
+);
+lme_brands_test_assert(
+	'linstantcle' === $real_config['rooms'][5]['brand'] && 'sexcaperoom' === $real_config['rooms'][6]['brand'],
+	'config réel : la chambre de test 5 est L\'Instant Clé, la chambre de test 6 est Sexcape Room (affectation délibérée, chapitre 4)'
+);
+
+// --- Non-régression 1 : la catégorie 1 n'est plus retirée sur l'hôte L'Instant Clé --
+//
+// Carte de catégories réelle (sir_vikbooking_rooms.idcat, relevée le
+// 14 septembre 2026). C'est le défaut du chapitre 2 : avant que la chambre 5
+// n'entre dans le registre, elle résolvait en 'excluded', jamais 'ok', ce qui
+// faisait retirer le paramètre category_id=1 même sur l'hôte L'Instant Clé,
+// alors que la catégorie 1 lui appartient entièrement.
+
+$real_category1_tokens = array(
+	1 => array( '1' ),
+	2 => array( '1' ),
+	5 => array( '1' ),
+	7 => array( '1' ),
+);
+$category1_room_ids   = lme_brands_room_ids_matching_category( $real_category1_tokens, 1 );
+$category1_all_ok_lic = true;
+
+foreach ( $category1_room_ids as $room_id ) {
+	$resolved = lme_brands_resolve_room( $real_config, $room_id );
+	if ( 'ok' !== $resolved['status'] || 'linstantcle' !== $resolved['brand_key'] ) {
+		$category1_all_ok_lic = false;
+		break;
+	}
+}
+
+lme_brands_test_assert(
+	array( 1, 2, 5, 7 ) === $category1_room_ids && $category1_all_ok_lic,
+	"non-régression : sur l'hôte L'Instant Clé, aucune chambre de la catégorie 1 (dont la 5) n'est étrangère à la marque — category_id n'est donc pas retiré"
+);
+
+// --- Non-régression 2 : une chambre à avail = 0 est refusée par la garde ------------
+
+$real_test_room_5 = lme_brands_resolve_room( $real_config, 5 );
+
+lme_brands_test_assert(
+	'refuse_unavailable' === lme_brands_evaluate_booking_room( $real_test_room_5, false, 'linstantcle' ),
+	'non-régression : la chambre de test 5, à avail = 0, est refusée par la garde même sur son propre hôte de marque'
 );
 
 // --- Résultat -------------------------------------------------------------------

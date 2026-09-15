@@ -85,16 +85,13 @@ function lme_brands_validate_config( $config ) {
 		$config['rooms'] = array();
 	}
 
-	$room_ids = array();
-
 	foreach ( $config['rooms'] as $room_id => $room ) {
 		if ( ! is_int( $room_id ) && ! ( is_string( $room_id ) && ctype_digit( $room_id ) ) ) {
 			$errors[] = 'Une chambre a une clé invalide : ' . var_export( $room_id, true ) . '.';
 			continue;
 		}
 
-		$room_id    = (int) $room_id;
-		$room_ids[] = $room_id;
+		$room_id = (int) $room_id;
 
 		if ( ! is_array( $room ) ) {
 			$errors[] = "La chambre #{$room_id} n'est pas un tableau.";
@@ -120,42 +117,23 @@ function lme_brands_validate_config( $config ) {
 		}
 	}
 
-	$excluded = isset( $config['excluded_room_ids'] ) ? $config['excluded_room_ids'] : array();
-
-	if ( ! is_array( $excluded ) ) {
-		$errors[]  = "'excluded_room_ids' doit être un tableau.";
-		$excluded = array();
-	}
-
-	$seen_excluded = array();
-
-	foreach ( $excluded as $excluded_id ) {
-		if ( ! is_int( $excluded_id ) ) {
-			$errors[] = "'excluded_room_ids' contient une valeur non entière : " . var_export( $excluded_id, true ) . '.';
-			continue;
-		}
-
-		if ( isset( $seen_excluded[ $excluded_id ] ) ) {
-			$errors[] = "'excluded_room_ids' contient un doublon : #{$excluded_id}.";
-		}
-		$seen_excluded[ $excluded_id ] = true;
-
-		if ( in_array( $excluded_id, $room_ids, true ) ) {
-			$errors[] = "La chambre #{$excluded_id} figure à la fois dans 'rooms' et dans 'excluded_room_ids'.";
-		}
-	}
-
 	return $errors;
 }
 
 /**
  * Résout la marque d'une chambre à partir de son identifiant Vik.
  *
- * Trois issues possibles, jamais une quatrième devinée :
- *   - 'ok'       : la chambre est vendue, sa marque est connue.
- *   - 'excluded' : chambre de test, volontairement hors registre de vente.
- *   - 'unknown'  : chambre absente du registre. Chapitre 6 : toujours une
- *                  erreur journalisée par l'appelant, jamais un cas par défaut.
+ * Deux issues possibles, jamais une troisième devinée (décision de Thomas,
+ * 14 septembre 2026, docs/briefs/brief-correctif-phase-2-filtrage.md
+ * chapitre 2) :
+ *   - 'ok'      : la chambre est déclarée dans le registre, sa marque est
+ *                 connue. Toute chambre active dans Vik (avail = 1) doit
+ *                 avoir cette issue ; une chambre désactivée (avail = 0)
+ *                 porte aussi une marque si elle est déclarée (chambres de
+ *                 test 5 et 6), mais n'est de toute façon jamais servie —
+ *                 voir includes/booking-guard.php pour le refus sur avail.
+ *   - 'unknown' : chambre absente du registre. Chapitre 6 : toujours une
+ *                 erreur journalisée par l'appelant, jamais un cas par défaut.
  *
  * @param array      $config
  * @param int|string $room_id
@@ -189,21 +167,47 @@ function lme_brands_resolve_room( array $config, $room_id ) {
 		// une chambre absente.
 	}
 
-	$excluded = isset( $config['excluded_room_ids'] ) && is_array( $config['excluded_room_ids'] )
-		? $config['excluded_room_ids']
-		: array();
-
-	if ( in_array( $room_id, $excluded, true ) ) {
-		return array(
-			'status'  => 'excluded',
-			'room_id' => $room_id,
-		);
-	}
-
 	return array(
 		'status'  => 'unknown',
 		'room_id' => $room_id,
 	);
+}
+
+/**
+ * Décide de l'issue d'une tentative de réservation pour une chambre, sans
+ * aucun effet de bord — la lecture de `avail` (Vik) et la résolution du
+ * registre sont faites par l'appelant (includes/booking-guard.php), qui n'a
+ * pas d'équivalent testable ici. Chapitre 5 et chapitre 6 du brief
+ * docs/briefs/brief-correctif-phase-2-filtrage.md.
+ *
+ * Le refus sur indisponibilité est vérifié en premier et sans condition :
+ * une chambre à `avail = 0` est refusée quelle que soit sa marque, y
+ * compris quand elle correspond à celle de l'hôte courant.
+ *
+ * @param array      $resolved       Voir lme_brands_resolve_room().
+ * @param bool|null  $available      true/false lu depuis
+ *                                    sir_vikbooking_rooms.avail ; null si la
+ *                                    chambre est absente de Vik ou la table
+ *                                    inaccessible — jamais interprété comme
+ *                                    une indisponibilité.
+ * @param string     $expected_brand Clé de marque de l'hôte de la requête.
+ * @return string 'allow', 'refuse_unavailable', 'refuse_foreign_brand', ou
+ *                'refuse_unknown_room'.
+ */
+function lme_brands_evaluate_booking_room( array $resolved, $available, $expected_brand ) {
+	if ( false === $available ) {
+		return 'refuse_unavailable';
+	}
+
+	if ( 'unknown' === $resolved['status'] ) {
+		return 'refuse_unknown_room';
+	}
+
+	if ( 'ok' === $resolved['status'] && $resolved['brand_key'] === $expected_brand ) {
+		return 'allow';
+	}
+
+	return 'refuse_foreign_brand';
 }
 
 /**

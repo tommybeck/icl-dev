@@ -40,12 +40,20 @@
  *                        bloquent mutuellement dans sir_vikbooking_calendars_xref ;
  *                        null pour une chambre indépendante.
  *
- * Les chambres 5 et 6 sont des chambres de test, jamais vendues, hors
- * affichage public et hors analyse (chapitre 2, chapitre 10). Elles sont
- * listées dans excluded_room_ids pour que l'écran de santé ne les signale
- * pas comme anomalie — mais elles ne résolvent jamais vers une marque :
- * toute tentative de le faire est une chambre exclue, journalisée en
- * avertissement, jamais un cas par défaut.
+ * Décision de Thomas, 14 septembre 2026 (docs/briefs/brief-correctif-phase-2-filtrage.md,
+ * chapitre 2) : toute chambre active dans Vik (`avail = 1`) porte une marque,
+ * sans exception. Une chambre désactivée dans Vik (`avail = 0`) n'est servie
+ * nulle part — ce fait vit dans Vik, pas ici (chapitre 3 du même brief : ne
+ * pas dupliquer `sir_vikbooking_rooms.avail` dans une seconde liste tenue à
+ * la main). Il n'y a donc plus de troisième statut « exclue » : une chambre
+ * du registre est vendue ou elle n'y est pas.
+ *
+ * Les chambres 5 et 6 sont des chambres de test, désactivées dans Vik
+ * (`avail = 0`), jamais vendues au public. Elles portent néanmoins une
+ * marque comme les autres, pour que l'écran de santé les traite normalement
+ * et que le statut 'unknown' redevienne une vraie anomalie (chambre créée
+ * dans Vik que personne n'a enregistrée), pas un état qui se confond avec
+ * une exclusion volontaire.
  *
  * expéditeur, adresse de réponse et signature ci-dessous sont des valeurs
  * de départ, cohérentes en forme mais pas encore arrêtées sur le fond :
@@ -143,11 +151,35 @@ return array(
 			'availability_group' => null,
 		),
 
-	),
+		// Chambres de test, désactivées dans Vik (avail = 0), jamais vendues
+		// au public — brief-correctif-phase-2-filtrage.md, chapitre 4.
+		// availability_group vérifié null pour les deux : aucune ligne pour
+		// ces chambres dans sir_vikbooking_calendars_xref (14 septembre 2026).
+		5 => array(
+			'brand'              => 'linstantcle',
+			// Nom Vik réel (sir_vikbooking_rooms.name) : « TEST room -
+			// chambre de TEST (Cinema clone) ».
+			'name'               => 'Chambre de test (clone Cinéma)',
+			'experience'         => 'Chambre de test',
+			'forfait'            => null,
+			'availability_group' => null,
+		),
+		6 => array(
+			// Affectation délibérée, pas une filiation : par sa nature la
+			// chambre 6 est un clone de la Maisonnette, donc de L'Instant
+			// Clé. Elle est affectée à Sexcape Room pour que chaque marque
+			// dispose d'une chambre de test et que la recette exerce les
+			// deux hôtes. Ne pas « corriger » vers linstantcle en croyant
+			// réparer une erreur : c'est le choix voulu.
+			'brand'              => 'sexcaperoom',
+			// Nom Vik réel (sir_vikbooking_rooms.name) : « TEST room -
+			// chambre de TEST (Maisonnette clone) ».
+			'name'               => 'Chambre de test (clone Maisonnette)',
+			'experience'         => 'Chambre de test',
+			'forfait'            => null,
+			'availability_group' => null,
+		),
 
-	// Chambres de test 5 et 6 : jamais vendues, hors affichage public, hors
-	// analyse (chapitre 2). Déclarées ici pour que l'écran de santé ne les
-	// traite pas comme une anomalie, sans jamais leur attribuer de marque.
-	'excluded_room_ids' => array( 5, 6 ),
+	),
 
 );

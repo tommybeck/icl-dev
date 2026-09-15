@@ -32,9 +32,8 @@ function lme_brands_get_config() {
 		}
 
 		$config = array(
-			'brands'            => array(),
-			'rooms'             => array(),
-			'excluded_room_ids' => array(),
+			'brands' => array(),
+			'rooms'  => array(),
 		);
 
 		return $config;
@@ -63,13 +62,6 @@ function lme_brands_resolve_room_or_log( $room_id ) {
 			'error',
 			'unknown_room',
 			sprintf( 'Chambre Vik #%d absente du registre lme-brands.', $resolved['room_id'] ),
-			array( 'room_id' => $resolved['room_id'] )
-		);
-	} elseif ( 'excluded' === $resolved['status'] ) {
-		lme_brands_log(
-			'warning',
-			'excluded_room',
-			sprintf( 'Chambre Vik #%d volontairement exclue du registre (chambre de test, jamais vendue).', $resolved['room_id'] ),
 			array( 'room_id' => $resolved['room_id'] )
 		);
 	}

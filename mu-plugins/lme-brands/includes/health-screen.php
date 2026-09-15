@@ -35,10 +35,8 @@ function lme_brands_render_health_screen() {
 
 	global $wpdb;
 
-	$config       = lme_brands_get_config();
-	$known_ids    = array_keys( $config['rooms'] );
-	$excluded_ids = isset( $config['excluded_room_ids'] ) ? $config['excluded_room_ids'] : array();
-	$registry_ids = array_unique( array_merge( $known_ids, $excluded_ids ) );
+	$config    = lme_brands_get_config();
+	$known_ids = array_keys( $config['rooms'] );
 
 	echo '<div class="wrap"><h1>Santé lme-brands</h1>';
 
@@ -57,7 +55,7 @@ function lme_brands_render_health_screen() {
 	}
 	$vik_ids = array_keys( $vik_rooms );
 
-	$missing_from_registry = array_values( array_diff( $vik_ids, $registry_ids ) );
+	$missing_from_registry = array_values( array_diff( $vik_ids, $known_ids ) );
 	$missing_from_vik       = array_values( array_diff( $known_ids, $vik_ids ) );
 	$synced                 = array_values( array_intersect( $known_ids, $vik_ids ) );
 
@@ -71,7 +69,7 @@ function lme_brands_render_health_screen() {
 
 	if ( ! empty( $missing_from_registry ) ) {
 		echo '<h2>Chambres présentes dans Vik, absentes du registre</h2>';
-		echo '<p>À ajouter dans <code>config/brands.php</code> (clé <code>rooms</code>), ou dans <code>excluded_room_ids</code> si elles ne doivent jamais se vendre.</p>';
+		echo '<p>À ajouter dans <code>config/brands.php</code> (clé <code>rooms</code>) avec une marque, y compris si la chambre est désactivée dans Vik (<code>avail = 0</code>) : toute chambre déclarée dans Vik porte une marque, sans exception (docs/briefs/brief-correctif-phase-2-filtrage.md, chapitre 2).</p>';
 		lme_brands_render_health_table( $missing_from_registry, $vik_rooms, $config );
 	}
 
@@ -106,9 +104,6 @@ function lme_brands_render_health_table( array $room_ids, array $vik_rooms, arra
 		if ( 'ok' === $resolved['status'] ) {
 			$brand_label = $config['brands'][ $resolved['brand_key'] ]['label'];
 			$experience  = $resolved['name'];
-		} elseif ( 'excluded' === $resolved['status'] ) {
-			$brand_label = '—';
-			$experience  = 'chambre de test';
 		} else {
 			$brand_label = '—';
 			$experience  = '—';
