@@ -21,7 +21,16 @@
  *   sender_name           nom affiché à côté de sender_email.
  *   reply_to              adresse de réponse.
  *   signature             signature en pied d'e-mail.
- *   confirmation_page_id  identifiant de la page de confirmation (phase 4).
+ *   confirmation_page_id  identifiant de la page de confirmation. Vaut 845
+ *                        pour les deux marques : constat-perimetre-tunnel.md
+ *                        §4 (A3) établit qu'une seule page WordPress porte
+ *                        les vues `booking`/`precheckin`/`revstay` et la
+ *                        tâche `notifypayment` sur les quatre hôtes de cette
+ *                        installation — détail, paiement, retour Stripe,
+ *                        confirmation et erreur y aboutissent tous. Ce n'est
+ *                        pas une page dupliquée par marque : c'est la même
+ *                        page, dont l'apparence varie déjà par hôte (chantier
+ *                        D, themes/astra-child/inc/sexcaperoom-tunnel.php).
  *   languages             langues actives pour cette marque.
  *   appearance            optionnel, chantier D (habillage du tunnel) — voir
  *                        le bloc dédié plus bas pour la forme exacte.
@@ -174,7 +183,10 @@ return array(
 			'sender_name'          => "L'Instant Clé",
 			'reply_to'             => 'reservations@linstantcle.ch',
 			'signature'            => "L'équipe L'Instant Clé",
-			'confirmation_page_id' => 0, // à renseigner en phase 4.
+			// Page partagée avec Sexcape Room, voir la note de tête de
+			// fichier sur 'confirmation_page_id' — constat-perimetre-tunnel.md
+			// §4 (A3), relevé le 12 septembre 2026.
+			'confirmation_page_id' => 845,
 			'languages'            => array( 'en', 'fr' ),
 
 			'mail' => array(
@@ -201,7 +213,10 @@ return array(
 			'sender_name'          => 'Sexcape Room',
 			'reply_to'             => 'reservations@sexcaperoom.ch',
 			'signature'            => "L'équipe Sexcape Room",
-			'confirmation_page_id' => 0, // à renseigner en phase 4.
+			// Même page que L'Instant Clé (845), voir la note de tête de
+			// fichier sur 'confirmation_page_id' — constat-perimetre-tunnel.md
+			// §4 (A3), relevé le 12 septembre 2026.
+			'confirmation_page_id' => 845,
 			'languages'            => array( 'fr' ), // anglais et allemand tracés, non livrés au lancement.
 
 			'mail' => array(

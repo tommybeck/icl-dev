@@ -4,7 +4,9 @@ Phase 1 du brief `docs/briefs/sexcape-room-reservation.md` : le registre des mar
 
 Phase 2 : le filtrage des chambres par marque — chapitre 4.3 du brief, couche de présentation puis couche de garde.
 
-Phase 3 : les e-mails par marque — chapitre 4.4, réécriture en vol du message client et de sa pièce jointe iCal. Rien d'autre — pas de paiement (phase 4). Les rappels avant séjour **ne sont pas couverts** : ils n'empruntent pas le même chemin d'envoi, ce qui est établi et proposé en §4 de `docs/briefs/constat-phase-3-emails.md`.
+Phase 3 : les e-mails par marque — chapitre 4.4, réécriture en vol du message client et de sa pièce jointe iCal. Les rappels avant séjour **ne sont pas couverts** : ils n'empruntent pas le même chemin d'envoi, ce qui est établi et proposé en §4 de `docs/briefs/constat-phase-3-emails.md`.
+
+Phase 4 : le paiement par marque — chapitre 4.5, métadonnée de marque sur la session Stripe, correction défensive de l'URL de retour, page de confirmation partagée. **Ne couvre pas** la réserve de paiement (commande restée en `standby` après un encaissement, `docs/briefs/constat-reserve-paiement.md`) : c'est le chantier B6, elle attend une décision de Thomas.
 
 Déployé sous `wp-content/mu-plugins/`. Ce dossier même n'est pas chargé automatiquement par WordPress : c'est `mu-plugins/lme-brands.php`, à la racine de `mu-plugins/`, qui pointe dessus.
 
@@ -27,6 +29,7 @@ mu-plugins/
       room-filter.php             filtrage des chambres, couche de présentation, chapitre 4.3
       booking-guard.php           filtrage des chambres, couche de garde, chapitre 4.3
       mail-brand.php              e-mails par marque, chapitre 4.4
+      payment-brand.php           paiement par marque, chapitre 4.5
       health-screen.php           écran de santé en administration, chapitre 4.2
     tests/
       test-core.php               tests automatisés de includes/core.php
@@ -192,6 +195,26 @@ C'est un **quatrième cas d'alerte**, ajouté aux trois du chapitre 6 : il const
 
 ---
 
+## Paiement par marque, chapitre 4.5, `includes/payment-brand.php`
+
+Greffé sur `payment_before_begin_transaction_vikbooking` (documenté en Q5 de `constat-phase-0.md`), qui se déclenche avant que VikStripe ne construise la session de paiement. Restreint à `$payment->isDriver('stripe')`, la seule passerelle publiée. La marque se résout depuis les chambres de la réservation (`lme_brands_booking_room_ids()`, désormais dans `includes/registry.php`, partagée avec `mail-brand.php`), jamais depuis l'hôte de la requête : un paiement peut reprendre une commande créée plus tôt.
+
+**Ce qu'il pose réellement, et ce que le brief demandait.** Le §4.5 du brief demande une métadonnée de marque et un `statement_descriptor_suffix` sur le **PaymentIntent**. Une lecture ciblée du greffon (`docs/briefs/constat-phase-4-paiement.md`, chapitre 2) établit que :
+
+- la seule clé lue par VikStripe pour une métadonnée par transaction est `tn_metadata` (`$payment->get('tn_metadata', [])`), fusionnée dans la métadonnée de la **session Stripe Checkout** — jamais copiée automatiquement sur le PaymentIntent qu'elle crée ;
+- `payment_intent_data.metadata` n'existe que via un réglage d'administration unique pour toute l'installation, partagé par les deux marques : structurellement impropre à une valeur par marque ;
+- `statement_descriptor_suffix` n'est lu nulle part dans le greffon.
+
+`lme_brands_set_payment_metadata()` pose donc `lme_brand`, `lme_room_ids` et `lme_booking_id` sur `tn_metadata` — la métadonnée de la session, pas du PaymentIntent. Le libellé de relevé bancaire n'est pas posé du tout : le levier n'existe pas sans modifier le greffon. Décision à prendre par Thomas, voir le constat.
+
+**L'URL de retour.** `return_url`, `error_url` et `notify_url` sont déjà construites sur le bon hôte par le cœur de Vik pendant la même requête (filtrées par `includes/url-rewrite.php`, phase 1). `lme_brands_correct_payment_urls()` est un filet, pas le mécanisme : elle vérifie l'hôte des trois valeurs et ne corrige que si l'une diffère de celui de la marque résolue — une correction réelle journalise en erreur et alerte (`payment_url_host_corrected`), parce qu'elle signale un trou ailleurs, pas un fonctionnement normal.
+
+**Marque indéterminée.** Comme en phase 3 : rien n'est posé, ni métadonnée ni correction d'URL, et `payment_brand_undetermined` journalise en erreur et alerte.
+
+**La page de confirmation.** `confirmation_page_id` vaut `845` pour les deux marques dans le registre — pas une page par marque, mais la même page partagée (`constat-perimetre-tunnel.md` §4), dont l'apparence varie déjà par hôte depuis le chantier D.
+
+---
+
 ## Écran de santé, chapitre 4.2
 
 Administration → Outils → **Santé lme-brands**. Compare les identifiants du registre (`rooms`) à `{prefixe}vikbooking_rooms`. Trois sections : chambres présentes dans Vik et absentes du registre, chambres présentes dans le registre et absentes de Vik, chambres synchronisées.
@@ -216,7 +239,7 @@ Sortie : une ligne par test, un total, et un code de sortie non nul si un test �
 
 La phase 3 porte le total à **96 tests, tous au vert**. Elle ajoute à `includes/core.php` neuf fonctions pures — `mail_audience()`, `resolve_brand_for_rooms()`, `normalize_language_tag()`, `pick_localized()`, `apply_text_replacements()`, `foreign_brand_tokens()`, `normalize_for_search()`, `find_foreign_tokens()`, `inject_html_before_body_end()` — et `mail_identity()`, qui décide seule de l'identité posée sur un message. C'est cette dernière qui porte la règle « jamais la mauvaise marque » : elle est pure, donc la règle est vérifiable sans site, sans base et sans envoyer un e-mail.
 
-`includes/logger.php`, `includes/registry.php`, `includes/url-rewrite.php`, `includes/room-filter.php`, `includes/booking-guard.php`, `includes/mail-brand.php` et `includes/health-screen.php` appellent des fonctions WordPress (`get_option`, `add_filter`, `add_action`, `$wpdb`, `is_admin`, `wp_die`...) et n'ont pas d'équivalent testable hors WordPress dans ce dépôt. Les vérifier suit les procédures manuelles ci-dessous, sur `staging10.linstantcle.ch` de préférence, jamais en production.
+`includes/logger.php`, `includes/registry.php`, `includes/url-rewrite.php`, `includes/room-filter.php`, `includes/booking-guard.php`, `includes/mail-brand.php`, `includes/payment-brand.php` et `includes/health-screen.php` appellent des fonctions WordPress (`get_option`, `add_filter`, `add_action`, `$wpdb`, `is_admin`, `wp_die`...) et n'ont pas d'équivalent testable hors WordPress dans ce dépôt. Les vérifier suit les procédures manuelles ci-dessous, sur `staging10.linstantcle.ch` de préférence, jamais en production. `payment-brand.php` ne définit aucune fonction pure nouvelle : il orchestre `lme_brands_resolve_brand_for_rooms()` et `lme_brands_swap_url_host()`, déjà couvertes par les tests de la phase 3 et de la phase 1.
 
 ---
 
@@ -343,6 +366,16 @@ Sur `staging10.linstantcle.ch`, jamais en production, avec un mode de paiement h
 ### 12. Les réservations OTA ne sont pas touchées
 
 Reprendre une réservation Airbnb ou Booking.com existante (`channel` renseigné) et lui renvoyer l'e-mail client depuis l'administration. L'expéditeur, l'objet et le corps doivent être **exactement** ceux d'avant l'installation du plugin, et `debug.log` ne doit porter aucune ligne `lme-brands` — y compris si la réservation porte une chambre Sexcape Room. C'est le §4.4 du brief, et c'est une limite connue, pas un défaut.
+
+### 13. Paiement par marque — critère de recette n°8 (portée réduite, voir le constat)
+
+Sur `staging10.linstantcle.ch`, en mode test Stripe. Détail complet et pourquoi la portée est réduite : `docs/briefs/constat-phase-4-paiement.md`.
+
+1. Réserver une chambre Sexcape Room (ex. 4) depuis `reservation.sexcaperoom.ch` jusqu'à l'écran de paiement. Dans le tableau de bord Stripe (mode test), ouvrir la **session Checkout** : ses métadonnées doivent porter `lme_brand: sexcaperoom`, `lme_room_ids`, `lme_booking_id`. Le PaymentIntent associé n'en porte aucune — attendu, pas une anomalie.
+2. `debug.log` ne doit porter aucune ligne `[lme-brands] [ERROR] [payment_url_host_corrected]` pour ce parcours : sa présence signale un trou dans le filtrage d'hôte de la phase 1, à corriger avant toute autre chose.
+3. Répéter côté `linstantcle.ch` : `lme_brand: linstantcle`.
+4. Annuler le paiement depuis l'écran Stripe : le client doit revenir sur la page 845 de l'hôte de départ, jamais celle de l'autre marque.
+5. Composer une réservation à marques mêlées dans l'administration de Vik (ex. 8 et 9) et déclencher un paiement Stripe si l'écran le permet : `debug.log` doit porter `[lme-brands] [ERROR] [payment_brand_undetermined]`, et la session créée ne doit porter aucune métadonnée `lme_*`.
 
 ---
 

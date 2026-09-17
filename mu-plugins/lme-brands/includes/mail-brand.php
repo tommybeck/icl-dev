@@ -212,59 +212,6 @@ function lme_brands_report_mail_leak( $haystack, array $identity, $booking_id ) 
 	);
 }
 
-/**
- * Identifiants des chambres d'une réservation, relus dans
- * `sir_vikbooking_ordersrooms` par `idorder`.
- *
- * Lecture seule, en cache pour la durée de la requête : `sendBookingEmail()`
- * boucle sur ses destinataires (`['guest', 'admin']` dans la plupart des
- * appels) et déclenche le hook une fois par destinataire, ce qui ferait
- * autrement deux requêtes identiques pour un seul envoi.
- *
- * @param int $idorder
- * @return int[]
- */
-function lme_brands_booking_room_ids( $idorder ) {
-	static $cache = array();
-
-	$idorder = (int) $idorder;
-
-	if ( isset( $cache[ $idorder ] ) ) {
-		return $cache[ $idorder ];
-	}
-
-	global $wpdb;
-
-	$table  = $wpdb->prefix . 'vikbooking_ordersrooms';
-	$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) === $table;
-
-	if ( ! $exists ) {
-		lme_brands_log(
-			'error',
-			'vik_ordersrooms_missing',
-			sprintf( "La table %s est introuvable : impossible de résoudre la marque de la réservation #%d.", $table, $idorder ),
-			array( 'table' => $table, 'booking_id' => $idorder )
-		);
-
-		$cache[ $idorder ] = array();
-
-		return $cache[ $idorder ];
-	}
-
-	// Nom de table issu de $wpdb->prefix, aucune entrée utilisateur ;
-	// $idorder passe par prepare().
-	$rows = $wpdb->get_col( $wpdb->prepare( "SELECT idroom FROM {$table} WHERE idorder = %d ORDER BY id ASC", $idorder ) );
-
-	$ids = array();
-	foreach ( (array) $rows as $row ) {
-		$ids[] = (int) $row;
-	}
-
-	$cache[ $idorder ] = array_values( array_unique( $ids ) );
-
-	return $cache[ $idorder ];
-}
-
 // --- La pièce jointe iCal ----------------------------------------------------
 
 add_action( 'vikbooking_before_create_mail_ical', 'lme_brands_brand_mail_ical', 10, 3 );

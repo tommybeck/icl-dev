@@ -123,3 +123,61 @@ function lme_brands_current_request_brand_key() {
 
 	return lme_brands_resolve_brand_by_host( lme_brands_get_config(), $host );
 }
+
+/**
+ * Identifiants des chambres d'une réservation, relus dans
+ * `sir_vikbooking_ordersrooms` par `idorder`. Partagé par includes/mail-brand.php
+ * (phase 3) et includes/payment-brand.php (phase 4) : les deux résolvent la
+ * marque d'une réservation existante de la même façon, depuis ses chambres,
+ * jamais depuis l'hôte de la requête (chapitre 4.4 et 4.5 du brief — un envoi
+ * ou un paiement peut être déclenché hors du contexte de l'hôte qui a créé la
+ * réservation).
+ *
+ * Lecture seule, en cache pour la durée de la requête : `sendBookingEmail()`
+ * boucle sur ses destinataires (`['guest', 'admin']` dans la plupart des
+ * appels) et déclenche son hook une fois par destinataire, ce qui ferait
+ * autrement deux requêtes identiques pour un seul envoi.
+ *
+ * @param int $idorder
+ * @return int[]
+ */
+function lme_brands_booking_room_ids( $idorder ) {
+	static $cache = array();
+
+	$idorder = (int) $idorder;
+
+	if ( isset( $cache[ $idorder ] ) ) {
+		return $cache[ $idorder ];
+	}
+
+	global $wpdb;
+
+	$table  = $wpdb->prefix . 'vikbooking_ordersrooms';
+	$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) === $table;
+
+	if ( ! $exists ) {
+		lme_brands_log(
+			'error',
+			'vik_ordersrooms_missing',
+			sprintf( "La table %s est introuvable : impossible de résoudre la marque de la réservation #%d.", $table, $idorder ),
+			array( 'table' => $table, 'booking_id' => $idorder )
+		);
+
+		$cache[ $idorder ] = array();
+
+		return $cache[ $idorder ];
+	}
+
+	// Nom de table issu de $wpdb->prefix, aucune entrée utilisateur ;
+	// $idorder passe par prepare().
+	$rows = $wpdb->get_col( $wpdb->prepare( "SELECT idroom FROM {$table} WHERE idorder = %d ORDER BY id ASC", $idorder ) );
+
+	$ids = array();
+	foreach ( (array) $rows as $row ) {
+		$ids[] = (int) $row;
+	}
+
+	$cache[ $idorder ] = array_values( array_unique( $ids ) );
+
+	return $cache[ $idorder ];
+}
