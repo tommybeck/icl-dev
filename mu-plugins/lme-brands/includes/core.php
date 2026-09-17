@@ -555,6 +555,76 @@ function lme_brands_mail_audience( $who ) {
 }
 
 /**
+ * Ramène une adresse e-mail à une forme comparable : sans espaces de bord,
+ * en minuscules.
+ *
+ * Le domaine d'une adresse est insensible à la casse, la partie locale ne
+ * l'est pas formellement — mais aucun service de messagerie courant ne
+ * distingue `Jean@…` de `jean@…`, et Vik lui-même ne normalise rien. La
+ * comparaison stricte ferait donc échouer un recoupement légitime sur une
+ * simple majuscule saisie par un client.
+ *
+ * @param mixed $address
+ * @return string Chaîne vide si l'argument n'est pas une chaîne.
+ */
+function lme_brands_normalize_email( $address ) {
+	if ( ! is_string( $address ) ) {
+		return '';
+	}
+
+	return strtolower( trim( $address ) );
+}
+
+/**
+ * La réservation trouvée dans le magasin partagé de Vik est-elle bien celle
+ * du message en partance ?
+ *
+ * C'est la parade du chantier B5, et elle est le cœur du dispositif.
+ * `vikbooking_before_send_mail` ne transporte aucun contexte métier : la
+ * réservation se retrouve dans `VikBookingHelperConditionalRules`, où
+ * l'émetteur la dépose avant de composer son message
+ * (`email_reminder.php:729-731`, `lib.vikbooking.php:5734`, et six autres
+ * émetteurs). Mais ce magasin est un `protected static` que Vik **ne vide
+ * jamais** entre deux envois : le lire sans vérification, c'est risquer
+ * d'attribuer à un message la marque du message précédent, exactement la
+ * « mauvaise marque » que le §4.4 du brief interdit.
+ *
+ * On n'y croit donc que si le client de cette réservation est parmi les
+ * destinataires du message. Sinon, on ne touche à rien — un message laissé
+ * tel quel part sous l'expéditeur global de l'installation, c'est-à-dire
+ * l'état d'avant ce plugin, jamais une marque devinée.
+ *
+ * La comparaison est normalisée mais pas approximative : une adresse de la
+ * forme `Nom <a@b.ch>` ne correspondra à rien, et le message sera laissé
+ * tel quel. Vik ne pose que des adresses nues à cet endroit
+ * (`jv_helper.php:68-80`, `lib.vikbooking.php:6440-6452`) ; le jour où il en
+ * poserait d'autres, ne rien faire est la bonne façon de se tromper.
+ *
+ * @param mixed $booking    Ce que le magasin partagé contient sous 'booking'.
+ * @param mixed $recipients `VBOMailWrapper::getRecipient()`, liste ou chaîne.
+ * @return bool
+ */
+function lme_brands_mail_booking_matches_recipients( $booking, $recipients ) {
+	if ( ! is_array( $booking ) || empty( $booking['id'] ) || empty( $booking['custmail'] ) ) {
+		return false;
+	}
+
+	$custmail = lme_brands_normalize_email( $booking['custmail'] );
+
+	if ( '' === $custmail ) {
+		return false;
+	}
+
+	foreach ( (array) $recipients as $recipient ) {
+		if ( lme_brands_normalize_email( $recipient ) === $custmail ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
  * Résout la marque d'une réservation à partir des chambres qu'elle porte.
  *
  * Le hook d'envoi ne transporte pas les identifiants de chambre

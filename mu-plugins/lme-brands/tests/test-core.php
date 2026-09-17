@@ -754,6 +754,102 @@ lme_brands_test_assert(
 	"une adresse neutre vide est refusée : null veut dire « garder celle de Vik », la chaîne vide ne veut rien dire"
 );
 
+// --- Chantier B5 : recoupement réservation / destinataires ------------------------
+
+echo "\nlme_brands_normalize_email() et lme_brands_mail_booking_matches_recipients()\n";
+
+lme_brands_test_assert(
+	'jean@example.ch' === lme_brands_normalize_email( '  Jean@Example.CH  ' ),
+	'une adresse est ramenée en minuscules, sans espaces de bord'
+);
+
+lme_brands_test_assert(
+	'' === lme_brands_normalize_email( null ) && '' === lme_brands_normalize_email( array( 'a@b.ch' ) ),
+	'ce qui n\'est pas une chaîne ne devient jamais une adresse'
+);
+
+$b5_booking = array(
+	'id'       => 1234,
+	'custmail' => 'client@example.ch',
+	'channel'  => null,
+	'lang'     => 'fr-FR',
+);
+
+lme_brands_test_assert(
+	true === lme_brands_mail_booking_matches_recipients( $b5_booking, array( 'client@example.ch' ) ),
+	'le client de la réservation déposée est le destinataire : on peut y croire'
+);
+
+lme_brands_test_assert(
+	true === lme_brands_mail_booking_matches_recipients( $b5_booking, 'client@example.ch' ),
+	'un destinataire unique passé en chaîne est accepté comme une liste d\'un élément'
+);
+
+lme_brands_test_assert(
+	true === lme_brands_mail_booking_matches_recipients( $b5_booking, array( 'CLIENT@Example.ch ' ) ),
+	'la casse et les espaces ne font pas échouer un recoupement légitime'
+);
+
+lme_brands_test_assert(
+	true === lme_brands_mail_booking_matches_recipients( $b5_booking, array( 'info@maisonnette-enchantee.ch', 'client@example.ch' ) ),
+	'le client compte même quand une règle conditionnelle a ajouté un destinataire administrateur'
+);
+
+lme_brands_test_assert(
+	false === lme_brands_mail_booking_matches_recipients( $b5_booking, array( 'info@maisonnette-enchantee.ch' ) ),
+	"le message de l'administrateur n'est pas rattaché à la réservation du client"
+);
+
+lme_brands_test_assert(
+	false === lme_brands_mail_booking_matches_recipients( $b5_booking, array( 'quelquun-dautre@example.ch' ) ),
+	'une réservation périmée dans le magasin partagé de Vik ne contamine pas le message suivant'
+);
+
+lme_brands_test_assert(
+	false === lme_brands_mail_booking_matches_recipients( null, array( 'client@example.ch' ) )
+		&& false === lme_brands_mail_booking_matches_recipients( array(), array( 'client@example.ch' ) ),
+	'un magasin vide ne rattache rien : un message sans réservation reste intouché'
+);
+
+lme_brands_test_assert(
+	false === lme_brands_mail_booking_matches_recipients( array( 'id' => 12, 'custmail' => '' ), array( 'client@example.ch' ) )
+		&& false === lme_brands_mail_booking_matches_recipients( array( 'custmail' => 'client@example.ch' ), array( 'client@example.ch' ) ),
+	'une réservation sans identifiant ou sans adresse client ne rattache rien'
+);
+
+lme_brands_test_assert(
+	false === lme_brands_mail_booking_matches_recipients( $b5_booking, array( 'Client <client@example.ch>' ) ),
+	"une adresse de la forme « Nom <adresse> » n'est pas décortiquée : le message est laissé tel quel, ce qui est la bonne façon de se tromper"
+);
+
+lme_brands_test_assert(
+	false === lme_brands_mail_booking_matches_recipients( $b5_booking, array() )
+		&& false === lme_brands_mail_booking_matches_recipients( $b5_booking, null ),
+	'un message sans destinataire ne rattache rien'
+);
+
+// L'identité posée sur un rappel est exactement celle du message client : même
+// registre, même résolution, même fonction pure. Ce que le chantier B5 change,
+// c'est ce qui en est lu — l'expéditeur et le nom affiché, rien d'autre.
+$b5_identity = lme_brands_mail_identity( $config, lme_brands_resolve_brand_for_rooms( $config, array( 9 ) ), 'fr-FR' );
+
+lme_brands_test_assert(
+	'reservations@sexcaperoom.ch' === $b5_identity['sender_email']
+		&& 'Sexcape Room' === $b5_identity['sender_name']
+		&& $b5_identity['sender_name'] !== $b5_identity['sender_email'],
+	'un rappel de chambre Sexcape Room prend expéditeur et nom Sexcape Room, et le nom ne vaut pas l\'adresse'
+);
+
+$b5_neutral = lme_brands_mail_identity( $config, lme_brands_resolve_brand_for_rooms( $config, array( 8, 9 ) ), 'fr-FR' );
+
+lme_brands_test_assert(
+	null === $b5_neutral['brand_key']
+		&& null === $b5_neutral['sender_email']
+		&& false === stripos( $b5_neutral['sender_name'], 'instant' )
+		&& false === stripos( $b5_neutral['sender_name'], 'sexcape' ),
+	"marque indéterminée sur un rappel : nom neutre, et l'adresse de Vik gardée plutôt qu'une adresse inventée"
+);
+
 // --- Phase 3 sur le registre réel --------------------------------------------------
 
 echo "\nPhase 3, registre réel config/brands.php\n";

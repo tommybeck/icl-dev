@@ -4,7 +4,9 @@ Phase 1 du brief `docs/briefs/sexcape-room-reservation.md` : le registre des mar
 
 Phase 2 : le filtrage des chambres par marque — chapitre 4.3 du brief, couche de présentation puis couche de garde.
 
-Phase 3 : les e-mails par marque — chapitre 4.4, réécriture en vol du message client et de sa pièce jointe iCal. Les rappels avant séjour **ne sont pas couverts** : ils n'empruntent pas le même chemin d'envoi, ce qui est établi et proposé en §4 de `docs/briefs/constat-phase-3-emails.md`.
+Phase 3 : les e-mails par marque — chapitre 4.4, réécriture en vol du message client et de sa pièce jointe iCal.
+
+Chantier B5 : la source des rappels avant séjour — second point d'accroche, `vikbooking_before_send_mail`, qui voit passer tous les e-mails de Vik. Il pose l'expéditeur et le nom affiché, **et rien d'autre** : le contenu du rappel vit dans le gabarit de la tâche planifiée, côté Vik, et c'est le chantier F. Détail dans `docs/briefs/constat-b5-rappels.md`.
 
 Phase 4 : le paiement par marque — chapitre 4.5, métadonnée de marque sur la session Stripe, correction défensive de l'URL de retour, page de confirmation partagée. **Ne couvre pas** la réserve de paiement (commande restée en `standby` après un encaissement, `docs/briefs/constat-reserve-paiement.md`) : c'est le chantier B6, elle attend une décision de Thomas.
 
@@ -28,7 +30,7 @@ mu-plugins/
       url-rewrite.php             réécriture d'URL par hôte, chapitre 4.1
       room-filter.php             filtrage des chambres, couche de présentation, chapitre 4.3
       booking-guard.php           filtrage des chambres, couche de garde, chapitre 4.3
-      mail-brand.php              e-mails par marque, chapitre 4.4
+      mail-brand.php              e-mails par marque, chapitre 4.4, et source des rappels, chantier B5
       payment-brand.php           paiement par marque, chapitre 4.5
       health-screen.php           écran de santé en administration, chapitre 4.2
     tests/
@@ -191,7 +193,25 @@ C'est un **quatrième cas d'alerte**, ajouté aux trois du chapitre 6 : il const
 
 ### Ce que ce fichier ne couvre pas
 
-**Les rappels avant séjour.** La tâche planifiée `email_reminder` de Vik n'appelle pas `sendBookingEmail()` : elle construit son propre `VBOMailWrapper` et appelle le mailer directement (`jv_helper.php:123-137`). `vikbooking_before_send_booking_mail` ne les voit donc pas, et ils partent aujourd'hui sous le nom de la marque du titre global du site, pour toutes les chambres. Établi ligne à ligne, avec le point d'accroche proposé et le code correspondant, en §4 de `docs/briefs/constat-phase-3-emails.md`.
+**Le corps du rappel avant séjour.** Il vit dans le gabarit de la tâche planifiée, saisi dans l'administration de Vik, où le logo et le titre L'Instant Clé sont aujourd'hui inconditionnels. Il se sépare par marque là-bas, par les textes conditionnels natifs : c'est le chantier F, et c'est un geste de Thomas, pas de code.
+
+---
+
+## La source des autres e-mails de Vik, chantier B5, `includes/mail-brand.php`
+
+Second point d'accroche du même fichier : `vikbooking_before_send_mail` (`onBeforeSendMail`, `platform/org/wordpress/mailer.php:52`), le seul hook que **tous** les e-mails de Vik traversent — rappels avant séjour compris, que `sendBookingEmail()` n'émet pas.
+
+**Ce qui est posé : l'expéditeur et le nom affiché, rien d'autre.** Ni objet, ni corps, ni adresse de réponse.
+
+**Comment la réservation est retrouvée.** Ce hook ne transporte aucun contexte métier. L'émetteur dépose sa réservation dans `VikBookingHelperConditionalRules` avant de composer son message — c'est le mécanisme natif des textes conditionnels —, et on la relit par son accesseur public `get('booking')`. Mais Vik **ne vide jamais** ce magasin entre deux envois : `lme_brands_mail_booking_matches_recipients()` n'y croit que si le client de cette réservation est parmi les destinataires du message. Sinon, rien n'est touché — le message part comme avant ce plugin, jamais sous une marque devinée.
+
+**Un message, un seul traitement.** Le message client de réservation traverse les deux hooks : le hook métier d'abord, puis celui-ci, sur le même objet. Le hook métier marque donc chaque message qu'il a vu, et celui-ci laisse les messages marqués tranquilles — y compris ceux que le hook métier a délibérément laissés intacts, la copie de l'administrateur et les réservations OTA. La marque vit dans un `WeakMap` (repli `SplObjectStorage` avant PHP 8.0), jamais dans un `spl_object_id()`, qui est réattribué après libération et ferait passer un rappel pour un message déjà traité.
+
+**Le périmètre réel dépasse le rappel, et c'est voulu.** Le recoupement retient tout message adressé au client d'une réservation directe dont la marque se résout : le rappel avant séjour, mais aussi le rappel de pré-enregistrement, les factures, la messagerie en lot et le message envoyé à la main depuis l'écran d'une réservation. Tous partent aujourd'hui sous `L'Instant Clé`, y compris pour une chambre Sexcape Room, et la marque de leur réservation est la bonne pour chacun.
+
+**Marque indéterminée** : identité neutre et alerte `mail_brand_undetermined`, exactement comme pour le message client — même code, le contexte porte `chemin: vikbooking_before_send_mail` pour distinguer les deux chemins dans le journal.
+
+**Pas de contrôle de fuite sur ce chemin, et c'est une décision.** Le corps du rappel nomme L'Instant Clé, c'est connu et inventorié en chantier F : une alerte à chaque envoi répéterait un fait déjà su. Le jour où F sera fait, y brancher `lme_brands_report_mail_leak()` rendra ce travail vérifiable en continu, comme il l'est pour la confirmation.
 
 ---
 
@@ -238,6 +258,8 @@ Sortie : une ligne par test, un total, et un code de sortie non nul si un test �
 `php` est disponible depuis le correctif de phase 2, suite (15 septembre 2026) : les 52 tests passent, y compris ceux d'`evaluate_booking_room()`, laissée inchangée par ce correctif — seul l'ordre dans `lme_brands_guard_booking_record()`, non couverte par ces tests car elle appelle des fonctions WordPress, a changé.
 
 La phase 3 porte le total à **96 tests, tous au vert**. Elle ajoute à `includes/core.php` neuf fonctions pures — `mail_audience()`, `resolve_brand_for_rooms()`, `normalize_language_tag()`, `pick_localized()`, `apply_text_replacements()`, `foreign_brand_tokens()`, `normalize_for_search()`, `find_foreign_tokens()`, `inject_html_before_body_end()` — et `mail_identity()`, qui décide seule de l'identité posée sur un message. C'est cette dernière qui porte la règle « jamais la mauvaise marque » : elle est pure, donc la règle est vérifiable sans site, sans base et sans envoyer un e-mail.
+
+Le chantier B5 porte le total à **110 tests, tous au vert**. Il ajoute `lme_brands_normalize_email()` et `lme_brands_mail_booking_matches_recipients()` — cette dernière est la parade contre l'état partagé que Vik ne remet jamais à zéro, donc la fonction qui décide si l'on a le droit de nommer une marque sur un rappel. Elle est pure, et ses dix cas se vérifient sans site, sans base et sans envoyer un e-mail.
 
 `includes/logger.php`, `includes/registry.php`, `includes/url-rewrite.php`, `includes/room-filter.php`, `includes/booking-guard.php`, `includes/mail-brand.php`, `includes/payment-brand.php` et `includes/health-screen.php` appellent des fonctions WordPress (`get_option`, `add_filter`, `add_action`, `$wpdb`, `is_admin`, `wp_die`...) et n'ont pas d'équivalent testable hors WordPress dans ce dépôt. Les vérifier suit les procédures manuelles ci-dessous, sur `staging10.linstantcle.ch` de préférence, jamais en production. `payment-brand.php` ne définit aucune fonction pure nouvelle : il orchestre `lme_brands_resolve_brand_for_rooms()` et `lme_brands_swap_url_host()`, déjà couvertes par les tests de la phase 3 et de la phase 1.
 
@@ -376,6 +398,20 @@ Sur `staging10.linstantcle.ch`, en mode test Stripe. Détail complet et pourquoi
 3. Répéter côté `linstantcle.ch` : `lme_brand: linstantcle`.
 4. Annuler le paiement depuis l'écran Stripe : le client doit revenir sur la page 845 de l'hôte de départ, jamais celle de l'autre marque.
 5. Composer une réservation à marques mêlées dans l'administration de Vik (ex. 8 et 9) et déclencher un paiement Stripe si l'écran le permet : `debug.log` doit porter `[lme-brands] [ERROR] [payment_brand_undetermined]`, et la session créée ne doit porter aucune métadonnée `lme_*`.
+
+### 14. La source des rappels avant séjour — chantier B5
+
+Sur `staging10.linstantcle.ch`, jamais en production. Mêmes prérequis d'adresses que le point 9.
+
+La tâche `Check-in info` (identifiant 7 dans `sir_vikbooking_cronjobs`) notifie deux jours avant l'arrivée. Pour la déclencher à volonté sans attendre, la dupliquer en préproduction avec `remindbefored` réglé sur l'écart réel d'une réservation de test, ou exécuter la tâche à la main depuis **Cron Jobs** dans l'administration de Vik.
+
+1. Créer en préproduction une réservation de la chambre 4 (Le Boudoir du Désir) dont l'arrivée tombe dans la fenêtre de la tâche, puis exécuter la tâche. Dans le message reçu, vérifier **dans les en-têtes bruts** : `From:` porte `Sexcape Room <reservations@sexcaperoom.ch>`.
+2. Vérifier que l'**objet** est resté celui de la tâche (`Infos de dernière minute pour votre séjour`) et que le **corps** est inchangé — logo et titre L'Instant Clé compris. C'est le comportement attendu tant que le chantier F n'est pas fait : B5 corrige l'expéditeur, F corrige le contenu.
+3. Refaire avec une chambre L'Instant Clé (ex. 8) : `From:` porte `L'Instant Clé <reservations@linstantcle.ch>`.
+4. Composer une réservation à marques mêlées (ex. 8 et 9) dont l'arrivée tombe dans la fenêtre, exécuter la tâche : `From:` ne nomme aucune des deux marques, et `debug.log` porte `[mail_brand_undetermined]` avec `reason: mixed_brands` et `chemin: vikbooking_before_send_mail`.
+5. Contre-épreuve du recoupement, celle qui compte : dans la **même exécution** de la tâche, deux réservations de marques différentes doivent produire deux messages de marques différentes. Si les deux portaient la même, la réservation du magasin partagé de Vik ne serait pas relue entre deux envois, et la parade serait en défaut.
+6. Contre-épreuve du marqueur : refaire le point 9.1 (message client d'une réservation Sexcape Room). Son `From:` doit être celui de la phase 3, et la copie de l'administrateur de cette même réservation doit rester inchangée — le hook générique ne doit ni doubler l'un, ni reprendre l'autre.
+7. Reprendre une réservation OTA portant une chambre Sexcape Room et lui faire envoyer un rappel : expéditeur inchangé, aucune ligne `lme-brands` dans le journal.
 
 ---
 
