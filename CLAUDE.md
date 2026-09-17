@@ -17,7 +17,7 @@ Back-office WordPress/Elementor de Thomas en **anglais** : donner les libellés 
 ## Règles absolues
 
 1. **Ne jamais modifier les fichiers d'un plugin tiers**, Vik Booking en premier lieu. Tout passe par un mu-plugin, le thème enfant, ou un hook. Une mise à jour efface toute édition directe.
-2. **Aucun secret dans un commit.** Ni `wp-config.php`, ni clé Stripe, ni identifiant de base, ni jeton d'API. Thomas les saisit lui-même sur le serveur. Le `.gitignore` en couvre les formes connues, ce qui ne dispense pas de vérifier avant de valider.
+2. **Aucun secret dans un commit.** Aucun secret dans un commit, ni dans une conversation. Ni wp-config.php, ni clé Stripe, ni identifiant de base, ni jeton d'API, ni secret OAuth. Cela vaut aussi pour les lectures : interroger wp_options, sir_vikbooking_config ou un fichier de configuration se fait par clé explicite, jamais par joker, et une valeur possiblement secrète se relève par empreinte. Thomas saisit les secrets lui-même.
 3. **Préproduction avant production, sauvegarde avant écriture.** Vérifier `environment: staging` avant toute écriture de contenu.
 4. **Le cache est le premier suspect.** Devant un comportement inexpliqué en frontal, purger NitroPack puis le cache dynamique SiteGround, et retester sur Safari et iPhone avant de conclure à un bug.
 5. **Rien de configurable n'est écrit en dur.** La correspondance chambre, marque, expérience et espace physique vit dans un fichier de configuration, jamais dans du code.
