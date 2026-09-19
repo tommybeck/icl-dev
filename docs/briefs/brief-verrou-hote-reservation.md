@@ -34,7 +34,11 @@ Ces deux risques courent maintenant, alors que D2 et B2 demanderont plusieurs jo
 
 ## Ce que le verrou doit garantir
 
-1. Sur l'hôte de réservation, seules les URL du tunnel répondent. Tout le reste part en redirection permanente vers `https://sexcaperoom.ch/`.
+1. Sur l'hôte de réservation, seules les pages du tunnel répondent. Tout le reste part en redirection vers `https://sexcaperoom.ch/`.
+
+   **La redirection est temporaire (302) pendant toute la recette, et ne passe en permanente (301) qu'une fois les six points validés.** Une 301 est mise en cache durablement par le navigateur du visiteur. Si la règle est mal conditionnée ne serait-ce qu'une heure, les visiteurs de linstantcle.ch garderont en mémoire locale une redirection vers sexcaperoom.ch, que ni une purge serveur ni un correctif ne rattrapent. C'est le seul geste du chantier dont l'erreur survit à sa correction.
+
+   **Le filtre porte sur l'identifiant de page résolu (`get_queried_object_id()`), jamais sur une chaîne de chemin.** TranslatePress publie trois préfixes de langue avec slugs traduits, et Vik émet deux formes du même écran dans une seule page (`/fr/reserver/` en action de formulaire, `/fr/book-now/` en lien `searchdetails`), la seconde redirigeant vers la première après le point où le verrou s'exécute. Une poignée d'identifiants numériques se maintient, douze chaînes instables non.
 2. L'hôte de réservation n'est jamais indexable, quelle que soit l'URL et quel que soit le type de réponse.
 3. Le `robots.txt` de cet hôte interdit tout et ne déclare aucun plan de site.
 4. **L'hôte linstantcle.ch ne change en rien.** Ni son indexation, ni ses redirections, ni son `robots.txt`.
@@ -57,8 +61,11 @@ L'en-tête HTTP vaut mieux que la balise `meta` ici, pour deux raisons : il couv
 
 - Les règles doivent être placées **avant** le bloc `# BEGIN WordPress`. Une régénération des permaliens réécrit ce bloc et avale ce qui s'y trouve.
 - NitroPack et SiteGround Optimizer touchent au `.htaccess`. Relire le fichier après toute manipulation de cache, et après toute mise à jour de ces deux greffons.
-- `mod_headers` doit être disponible. Sur SiteGround il l'est, à confirmer avant de compter dessus.
-- WordPress sert `/robots.txt` dynamiquement dès qu'aucun fichier physique n'existe. Servir un `robots.txt` propre à un hôte demande donc une règle de réécriture, pas seulement un fichier déposé.
+- ~~`mod_headers` doit être confirmé~~ **Levé le 12 septembre 2026** : le `.htaccess` en place porte déjà un `Header unset Vary` sans garde `<IfModule>` et le serveur ne renvoie pas d'erreur 500, donc le module est chargé.
+- **`/robots.txt` est un fichier physique de 571 octets sur cette installation**, pas une réponse dynamique de WordPress. La conclusion tient, servir un fichier propre à l'hôte demande bien une règle de réécriture, mais vers un **second fichier physique** et non vers une sortie de WordPress.
+- **Les quatre hôtes partagent une seule racine.** `linstantcle.ch`, `reservation.sexcaperoom.ch`, `maisonnette-enchantee.ch` et `api.linstantcle.ch` renvoient le même inode pour `index.php` et pour `.htaccess` : un seul fichier, un seul `mu-plugins/`. Toute règle non conditionnée à l'hôte frappe les quatre. `api-host.php` verrouille déjà l'hôte d'API avec ce montage et sert de patron.
+- **`redirect_canonical` doit être neutralisé sur l'hôte**, sans quoi WordPress redirige les formes non canoniques vers linstantcle.ch avant que `lme-brands` n'ait réécrit `option_home`.
+- **Le verrou ne voit pas les fichiers PHP servis directement.** `template_redirect` ne se déclenche ni pour `/wp-login.php`, ni pour `/wp-admin/`, ni pour `trp-ajax.php` : ce sont des fichiers physiques. Le `X-Robots-Tag` du `.htaccess` les couvre pour l'indexation, leur accessibilité est une décision séparée. Voir la dette assumée.
 
 ## Recette
 
@@ -70,6 +77,20 @@ L'en-tête HTTP vaut mieux que la balise `meta` ici, pour deux raisons : il couv
 6. Le tunnel fonctionne de bout en bout sur l'hôte de réservation, y compris le retour de paiement.
 
 Les six se rejouent après purge des deux caches, sur Safari et sur iPhone.
+
+## Prérequis, deux gestes de Thomas avant V2
+
+**1. ~~Enregistrer la page 6287~~ Fait le 13 septembre 2026 à 10 h 22.** Vérifié en lecture seule dans `sir_vikbooking_wpshortcodes` : enregistrement 19, `type=roomdetails`, `roomid=10`, `post_id=6287`, `lang=*`, `parent_id=3`. Il concorde désormais sur `view` et sur `roomid`, donc il l'emporte à deux points contre un sur tout autre enregistrement. Reste à porter la ligne dans `journal-vik.md`.
+
+**Ce que la même lecture révèle, et qui n'était pas dans le constat.** Aucun enregistrement n'existe pour les chambres 7, 8 et 9. `matchShortcode` n'exigeant aucun score minimal, un lien `roomdetails` vers l'une de ces trois chambres tombe aujourd'hui sur le premier enregistrement concordant sur `view` seul, c'est-à-dire l'enregistrement 4, page 1019, `l-entracte`. Pour la chambre 7 le résultat est presque juste, le forfait étant une variante de L'Entracte. Pour La Parenthèse et L'Indécent il est faux. **Ces deux enregistrements sont donc à créer avant l'ouverture des chambres 8 et 9**, et celui de L'Indécent suppose d'abord que sa fiche existe, ce que le constat signale déjà au chantier D.
+
+Vérification, à rejouer après tout ajout : `SELECT id, type, json, post_id FROM sir_vikbooking_wpshortcodes WHERE type = 'roomdetails' ORDER BY id`. Un enregistrement utile porte le bon `roomid` dans `json` et un `post_id` non nul.
+
+**2. Exclure `reservation.sexcaperoom.ch` du cache dynamique SiteGround et de NitroPack.** Les deux hôtes renvoient le même `host-header`, qui identifie la racine partagée. Si la clé de cache ne comprend pas le `Host`, une réponse mise en cache pour un hôte est servie pour l'autre, et un verrou PHP est sans effet sur une réponse qui ne passe pas par PHP. La question de savoir si la clé inclut le `Host` n'est pas mesurable sans provoquer une mise en cache en production : plutôt que de la mesurer, on la rend sans objet. Un tunnel de réservation n'a de toute façon aucune raison d'être mis en cache, prix et disponibilité changeant à chaque appel. NitroPack ne traite pas encore cet hôte, ce qui laisse le temps de poser l'exclusion avant qu'il ne s'y mette.
+
+## Dette assumée
+
+**`/wp-login.php` et `/wp-admin/` restent joignables sur l'hôte de réservation**, et c'est un choix. Les fermer demande une règle conditionnée à l'hôte dont l'erreur ferme l'administration de linstantcle.ch, soit exactement le danger que la garantie 4 désigne. Le bénéfice serait mince : ces URL sont déjà publiques sur linstantcle.ch, donc les exposer sur un second hôte n'ouvre pas une porte de plus, seulement un chemin de plus vers la même. Le `X-Robots-Tag` les couvre pour l'indexation, qui était le problème réel. À revoir seulement si une raison nouvelle apparaît, et jamais dans le même geste que la pose du verrou.
 
 ## Retrait
 
@@ -95,7 +116,9 @@ Deux sessions, pas une. Le périmètre est un travail de constat dans du code ti
 
 > Lis `CLAUDE.md`, `docs/briefs/brief-verrou-hote-reservation.md` et `docs/briefs/constat-perimetre-tunnel.md`.
 >
-> Implémente dans `mu-plugins/lme-brands/` la liste blanche du constat et la redirection permanente vers `https://sexcaperoom.ch/` de tout ce qui n'y figure pas, conditionnées à l'hôte et inertes sur tout autre hôte. La liste vit dans le fichier de configuration des marques, jamais en dur dans le code.
+> Implémente dans `mu-plugins/lme-brands/` la liste blanche du constat et la redirection vers `https://sexcaperoom.ch/` de tout ce qui n'y figure pas, conditionnées à l'hôte et inertes sur tout autre hôte. Le filtre porte sur l'identifiant de page résolu, jamais sur une chaîne de chemin, et la liste d'identifiants vit dans `config/brands.php` sous la clé `sexcaperoom`, au même titre que `host` et `rooms`. Suis le montage de `api-host.php`, y compris la neutralisation de `redirect_canonical`.
+>
+> **La redirection est un 302 tant que la recette n'est pas passée.** Le passage en 301 est un second geste, après validation des six points. Décisions de Thomas déjà prises, à appliquer sans les rouvrir : les pages 844, 845, 6287, 4209, 3654 et 1965 sont ouvertes ; les trois préfixes de langue sont ouverts ; `/wp-login.php` et `/wp-admin/` restent joignables.
 >
 > Produis séparément, sans le déposer, le fragment de `.htaccess` portant le `X-Robots-Tag` conditionné à l'hôte et la règle servant un `robots.txt` propre à cet hôte. Le dépôt sur le serveur est un geste de Thomas. Indique où le fragment s'insère par rapport au bloc `# BEGIN WordPress`, et ce qu'il faut vérifier après.
 >
