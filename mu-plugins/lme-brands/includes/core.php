@@ -403,6 +403,58 @@ function lme_brands_swap_url_host( $url, $new_host ) {
 }
 
 /**
+ * Décide de l'hôte à utiliser pour la résolution de marque, en tenant compte
+ * du levier de préproduction B8. Fonction pure : ne lit ni `$_SERVER`, ni une
+ * constante, ni `wp_get_environment_type()` — tout est passé en paramètre par
+ * l'appelant (`includes/registry.php`), seul habilité à ces lectures et à la
+ * journalisation de l'emploi du levier. C'est ce qui rend vérifiable, sans
+ * site WordPress, la règle la plus sensible de ce chantier : que le levier ne
+ * puisse jamais s'activer ailleurs qu'en préproduction.
+ *
+ * Trois garanties, dans l'ordre où le brief les demande
+ * (docs/briefs/plan-de-marche.md §B8) :
+ *   - le levier n'a aucun effet si `$environment_type` n'est pas exactement
+ *     `'staging'` — jamais en production, jamais en local, jamais en
+ *     développement, quelle que soit la valeur de la constante ;
+ *   - le levier ne vient jamais d'une requête : `$override` est la valeur
+ *     déjà lue depuis la constante PHP `LME_BRANDS_HOST_OVERRIDE` par
+ *     l'appelant, jamais depuis `$_GET`, `$_POST` ou un en-tête ;
+ *   - une constante vide ou absente (`null`) est traitée comme absente : elle
+ *     ne force jamais l'hôte vers la chaîne vide, ce qui ferait échouer toute
+ *     résolution de marque plutôt que de la laisser inchangée.
+ *
+ * Le registre ne change pas : cette fonction ne fait que décider quel hôte
+ * `lme_brands_resolve_brand_by_host()` recevra ensuite. Un hôte de
+ * substitution qui n'est celui d'aucune marque continue de ne résoudre aucune
+ * marque, exactement comme un hôte de requête inconnu.
+ *
+ * @param string|null $request_host     Hôte lu depuis `$_SERVER['HTTP_HOST']`,
+ *                                       déjà normalisé (minuscule, sans port),
+ *                                       ou `null` si absent.
+ * @param string      $environment_type Valeur de `wp_get_environment_type()`.
+ * @param mixed       $override         Valeur de la constante
+ *                                       `LME_BRANDS_HOST_OVERRIDE` si elle est
+ *                                       définie, `null` sinon.
+ * @return array{host: string|null, override_used: bool}
+ */
+function lme_brands_resolve_effective_http_host( $request_host, $environment_type, $override ) {
+	if ( 'staging' === $environment_type && is_string( $override ) && '' !== trim( $override ) ) {
+		$host = strtolower( trim( $override ) );
+		$host = preg_replace( '/:\d+$/', '', $host );
+
+		return array(
+			'host'          => $host,
+			'override_used' => true,
+		);
+	}
+
+	return array(
+		'host'          => $request_host,
+		'override_used' => false,
+	);
+}
+
+/**
  * Découpe une liste d'identifiants reçue en paramètre de requête : tableau
  * (soumission `nom[]=...`) ou chaîne délimitée par virgule ou point-virgule
  * (format des jetons idrooms/idcat de Vik, constat-phase-0.md Q6). Toute

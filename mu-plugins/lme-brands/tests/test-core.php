@@ -275,6 +275,63 @@ lme_brands_test_assert(
 	'swap_url_host : conserve un port explicite'
 );
 
+// --- Chantier B8 : levier de préproduction -------------------------------------
+
+echo "\nlme_brands_resolve_effective_http_host()\n";
+
+lme_brands_test_assert(
+	array( 'host' => 'reservation.sexcaperoom.ch', 'override_used' => true )
+		=== lme_brands_resolve_effective_http_host( 'staging10.linstantcle.ch', 'staging', 'reservation.sexcaperoom.ch' ),
+	"resolve_effective_http_host : en préproduction, la constante définie force l'hôte"
+);
+
+lme_brands_test_assert(
+	array( 'host' => 'staging10.linstantcle.ch', 'override_used' => false )
+		=== lme_brands_resolve_effective_http_host( 'staging10.linstantcle.ch', 'staging', null ),
+	"resolve_effective_http_host : en préproduction sans constante définie, l'hôte de la requête est gardé"
+);
+
+lme_brands_test_assert(
+	array( 'host' => 'staging10.linstantcle.ch', 'override_used' => false )
+		=== lme_brands_resolve_effective_http_host( 'staging10.linstantcle.ch', 'staging', '' ),
+	"resolve_effective_http_host : une constante vide est traitée comme absente, jamais comme un hôte vide"
+);
+
+foreach ( array( 'production', 'local', 'development', '' ) as $other_environment ) {
+	lme_brands_test_assert(
+		array( 'host' => 'linstantcle.ch', 'override_used' => false )
+			=== lme_brands_resolve_effective_http_host( 'linstantcle.ch', $other_environment, 'reservation.sexcaperoom.ch' ),
+		"resolve_effective_http_host : la constante n'a aucun effet hors de l'environnement 'staging' (ici '{$other_environment}')"
+	);
+}
+
+lme_brands_test_assert(
+	array( 'host' => 'reservation.sexcaperoom.ch', 'override_used' => true )
+		=== lme_brands_resolve_effective_http_host( null, 'staging', '  RESERVATION.SEXCAPEROOM.CH:8443  ' ),
+	'resolve_effective_http_host : la constante est ramenée en minuscules, sans port ni espaces de bord, même sans hôte de requête'
+);
+
+lme_brands_test_assert(
+	array( 'host' => null, 'override_used' => false )
+		=== lme_brands_resolve_effective_http_host( null, 'staging', null ),
+	"resolve_effective_http_host : sans hôte de requête ni constante, il n'y a toujours aucun hôte"
+);
+
+// --- Non-régression 3 : le levier ne dispense jamais de connaître le registre --
+//
+// Le levier ne fait que choisir l'hôte transmis à
+// lme_brands_resolve_brand_by_host() ; il ne doit rien changer à cette
+// résolution elle-même. Un hôte de substitution qui n'est celui d'aucune
+// marque continue de ne résoudre aucune marque, exactement comme un hôte de
+// requête ordinaire.
+
+$override_outcome = lme_brands_resolve_effective_http_host( 'staging10.linstantcle.ch', 'staging', 'hote-inconnu.example.ch' );
+lme_brands_test_assert(
+	true === $override_outcome['override_used']
+		&& null === lme_brands_resolve_brand_by_host( $config, $override_outcome['host'] ),
+	"non-régression : le levier de préproduction n'invente jamais une marque pour un hôte de substitution inconnu du registre"
+);
+
 // --- lme_brands_rate_limit_gate ------------------------------------------------
 
 $state = array();

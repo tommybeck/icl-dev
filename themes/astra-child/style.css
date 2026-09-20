@@ -4,3 +4,17 @@ Template: astra
 Version: 1.0.0
 */
 
+/*
+NE PAS DÉPLOYER CE FICHIER. Constaté par lecture directe du serveur le
+20 septembre 2026 (docs/briefs/constat-deploiement-moteur.md, chapitre 2) :
+wp-content/themes/astra-child/style.css réel fait 2771 octets, contre 6 ici,
+et porte l'en-tête complet du thème (Author, Description...) que WordPress a
+déjà lu pour reconnaître et activer ce thème enfant — il l'est depuis avant
+ce chantier (`current_theme = Astra Child` en base). Rien dans B8 ne demande
+de modifier ce fichier : ni l'apparence Sexcape Room (chargée par
+`inc/sexcaperoom-tunnel.php`, un fichier séparé) ni la constante de
+préproduction n'y touchent. Ce fichier local reste un aide-mémoire de la
+forme minimale qu'un style.css de thème enfant doit porter, pas une copie du
+serveur, et ne fait partie d'aucun inventaire de déploiement.
+*/
+

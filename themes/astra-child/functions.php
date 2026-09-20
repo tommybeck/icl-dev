@@ -1,38 +1,40 @@
 <?php
 /**
- * astra-child — mise en file de la feuille du thème enfant.
+ * astra-child — CE FICHIER N'EST PAS À DÉPLOYER TEL QUEL. NE JAMAIS ÉCRASER
+ * wp-content/themes/astra-child/functions.php AVEC CETTE COPIE.
  *
- * Fichier cible : wp-content/themes/astra-child/functions.php
- * Ce fichier fait 0 octet aujourd'hui. Colle tout ce bloc, <?php compris.
+ * Constaté par lecture directe du serveur le 20 septembre 2026
+ * (docs/briefs/constat-deploiement-moteur.md, chapitre 2) : le fichier réel
+ * fait 7390 octets, daté du 6 mai 2026, et porte déjà de la logique de
+ * production sans rapport avec ce chantier — suivi de conversion Google
+ * Analytics et Meta Pixel sur les réservations Vik Booking et sur les
+ * commandes VikRestaurants, règles `noindex` par page pour Yoast et Rank
+ * Math, visibilité de la barre d'administration pour les éditeurs,
+ * surlignage des jours de check-in indisponibles sur le calendrier Vik,
+ * balise de vérification de domaine Facebook, autorisation du robot
+ * Facebook. Un ancien commentaire de cette ligne affirmait « ce fichier fait
+ * 0 octet aujourd'hui » : c'était vrai avant la phase D2, ça ne l'est plus,
+ * et écraser le fichier réel avec cette copie supprimerait tout ce qui
+ * précède en silence, sans erreur PHP, découvert seulement quand un
+ * indicateur (revenu publicitaire, référencement) décrocherait sans raison
+ * apparente. Aucun de ces deux fichiers ne s'écrase : ils se fusionnent, un
+ * geste de Thomas.
  *
- * Le handle du parent, « astra-theme-css », a été relevé dans le HTML du front
- * de sexcaperoom.ch/fr/, pas supposé. Il est déclaré en dépendance pour que
- * l'enfant sorte après le parent dans la file.
+ * Une seule ligne manque au fichier réel, et c'est la seule à y ajouter,
+ * n'importe où au niveau racine du fichier (elle ne dépend de rien d'autre
+ * qui s'y trouve, et rien d'autre n'en dépend) :
  *
- * La version est l'horodatage du fichier. À chaque enregistrement de style.css
- * l'URL change, donc le navigateur ne peut pas servir l'ancienne feuille.
- * C'est ce qui évite de confondre « le CSS ne s'applique pas » et
- * « le navigateur me montre la version d'avant ».
+ *     require_once get_stylesheet_directory() . '/inc/sexcaperoom-tunnel.php';
+ *
+ * Pas d'enqueue de style.css à ajouter : le fichier réel enqueue déjà
+ * `style.css` sous le handle `astra-child-theme-css`, priorité 15,
+ * dépendance `astra-theme-css` — en ajouter un second sous un autre handle
+ * ne casserait rien mais chargerait le même fichier deux fois pour rien.
+ *
+ * `inc/sexcaperoom-tunnel.php` (chapitre 4.1 du brief principal, chantier D)
+ * est un fichier autonome et neuf sur le serveur : aucune collision de nom de
+ * fonction ou de handle avec ce qui existe déjà n'a été trouvée à la lecture
+ * du fichier réel. Le retirer, ou retirer la seule ligne `require_once`
+ * ajoutée ci-dessus, restaure l'apparence Astra sur les deux hôtes sans
+ * toucher au reste de functions.php.
  */
-
-add_action(
-	'wp_enqueue_scripts',
-	function () {
-		$chemin = get_stylesheet_directory() . '/style.css';
-
-		wp_enqueue_style(
-			'astra-child-style',
-			get_stylesheet_directory_uri() . '/style.css',
-			array( 'astra-theme-css' ),
-			file_exists( $chemin ) ? (string) filemtime( $chemin ) : '1.0.0'
-		);
-	},
-	20
-);
-
-/**
- * Habillage Sexcape Room des pages du tunnel de réservation, conditionné à
- * l'hôte. Chantier D, docs/briefs/brief-habillage-tunnel.md. Fichier
- * autonome : le retirer restaure l'apparence Astra sur les deux hôtes.
- */
-require_once get_stylesheet_directory() . '/inc/sexcaperoom-tunnel.php';

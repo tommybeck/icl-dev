@@ -10,6 +10,8 @@ Chantier B5 : la source des rappels avant séjour — second point d'accroche, `
 
 Phase 4 : le paiement par marque — chapitre 4.5, métadonnée de marque sur la session Stripe, correction défensive de l'URL de retour, page de confirmation partagée. **Ne couvre pas** la réserve de paiement (commande restée en `standby` après un encaissement, `docs/briefs/constat-reserve-paiement.md`) : c'est le chantier B6, elle attend une décision de Thomas.
 
+Chantier B8 : le levier de préproduction — `LME_BRANDS_HOST_OVERRIDE`, `includes/core.php` et `includes/registry.php`. Sans lui, `staging10.linstantcle.ch` ne résout vers aucune marque et la préproduction ne peut exercer aucun chemin Sexcape Room. Voir la section dédiée plus bas et `docs/briefs/constat-deploiement-moteur.md` pour l'inventaire de déploiement.
+
 Déployé sous `wp-content/mu-plugins/`. Ce dossier même n'est pas chargé automatiquement par WordPress : c'est `mu-plugins/lme-brands.php`, à la racine de `mu-plugins/`, qui pointe dessus.
 
 ---
@@ -106,6 +108,29 @@ add_action( 'lme_brands_alert', function ( $level, $code, $message, $context ) {
     // Envoyer vers Telegram avec le jeton défini côté serveur.
 } );
 ```
+
+---
+
+## Levier de préproduction, chantier B8
+
+`staging10.linstantcle.ch` a un inode distinct de linstantcle.ch (`constat-perimetre-tunnel.md`) : c'est une installation à part, mais son hôte n'est celui d'aucune marque du registre, et c'est voulu (« on ne devine jamais une marque »). Sans levier, la préproduction ne peut donc exercer aucun chemin Sexcape Room — ni la présentation, ni la garde, ni l'habillage.
+
+`LME_BRANDS_HOST_OVERRIDE` force l'hôte que **toute** la résolution de marque utilise, sans toucher au registre :
+
+```php
+// wp-config.php de staging10.linstantcle.ch seulement, jamais ailleurs.
+define( 'LME_BRANDS_HOST_OVERRIDE', 'reservation.sexcaperoom.ch' );
+```
+
+Trois garanties, vérifiées par les tests purs de `lme_brands_resolve_effective_http_host()` (`includes/core.php`) :
+
+- **inerte hors préproduction.** La constante n'a d'effet que si `wp_get_environment_type()` vaut exactement `'staging'` — jamais en production, jamais en local. Une même ligne oubliée dans le mauvais `wp-config.php` ne fait rien.
+- **jamais depuis une requête.** La valeur vient uniquement de la constante PHP, jamais de `$_GET`, `$_POST` ni d'un en-tête : un visiteur ne peut pas la déclencher lui-même.
+- **le registre ne change pas.** Le levier ne fait que choisir quel hôte `lme_brands_resolve_brand_by_host()` reçoit ensuite. Un hôte de substitution qui n'est celui d'aucune marque continue de ne résoudre aucune marque, exactement comme un hôte de requête inconnu.
+
+Chaque emploi du levier journalise une ligne `[lme-brands] [WARNING] [host_override_used]` — une seule par requête, `lme_brands_current_http_host()` la mettant en cache pour la durée de la requête. Ce n'est pas une alerte (chapitre 6 : les trois cas qui alertent sans exception restent chambre inconnue, marque indéterminée à l'envoi, chambre étrangère à l'hôte) : le levier actif en préproduction est un fonctionnement attendu pendant la recette de B8, pas une anomalie.
+
+Pour basculer entre les deux marques pendant la recette, changer la valeur de la constante et enregistrer `wp-config.php` — aucun redéploiement de code.
 
 ---
 
@@ -261,11 +286,22 @@ La phase 3 porte le total à **96 tests, tous au vert**. Elle ajoute à `include
 
 Le chantier B5 porte le total à **110 tests, tous au vert**. Il ajoute `lme_brands_normalize_email()` et `lme_brands_mail_booking_matches_recipients()` — cette dernière est la parade contre l'état partagé que Vik ne remet jamais à zéro, donc la fonction qui décide si l'on a le droit de nommer une marque sur un rappel. Elle est pure, et ses dix cas se vérifient sans site, sans base et sans envoyer un e-mail.
 
+Le chantier B8 porte le total à **120 tests, tous au vert**. Il ajoute `lme_brands_resolve_effective_http_host()`, qui décide seule si le levier de préproduction s'applique — c'est elle qui garantit, de façon vérifiable sans WordPress, que le levier reste inerte hors de l'environnement `staging` quelle que soit la constante définie par erreur ailleurs. `includes/registry.php` (`lme_brands_current_http_host()`), qui lit la constante et journalise son emploi, n'a pas d'équivalent testable hors WordPress, comme le reste des fichiers `includes/` listés ci-dessous.
+
 `includes/logger.php`, `includes/registry.php`, `includes/url-rewrite.php`, `includes/room-filter.php`, `includes/booking-guard.php`, `includes/mail-brand.php`, `includes/payment-brand.php` et `includes/health-screen.php` appellent des fonctions WordPress (`get_option`, `add_filter`, `add_action`, `$wpdb`, `is_admin`, `wp_die`...) et n'ont pas d'équivalent testable hors WordPress dans ce dépôt. Les vérifier suit les procédures manuelles ci-dessous, sur `staging10.linstantcle.ch` de préférence, jamais en production. `payment-brand.php` ne définit aucune fonction pure nouvelle : il orchestre `lme_brands_resolve_brand_for_rooms()` et `lme_brands_swap_url_host()`, déjà couvertes par les tests de la phase 3 et de la phase 1.
 
 ---
 
 ## Procédures de vérification manuelle
+
+### 0. Le levier de préproduction — préalable à toute recette sur staging10
+
+1. Sur `staging10.linstantcle.ch`, sans la constante définie : visiter n'importe quelle page front, vérifier `debug.log` — aucune ligne `[host_override_used]`. `lme_brands_current_request_brand_key()` doit résoudre `null` (aucune marque), comportement inchangé depuis la phase 1.
+2. Ajouter `define( 'LME_BRANDS_HOST_OVERRIDE', 'reservation.sexcaperoom.ch' );` dans le `wp-config.php` de `staging10` (jamais dans celui de production). Recharger une page front : `debug.log` doit porter une ligne `[lme-brands] [WARNING] [host_override_used]`, une seule pour la requête même si plusieurs fonctions du plugin appellent la résolution d'hôte.
+3. Vérifier que la page se comporte comme si elle était visitée depuis `reservation.sexcaperoom.ch` : présentation, garde et apparence (une fois D2 déployé) suivent la marque Sexcape Room.
+4. Changer la valeur de la constante pour `linstantcle.ch` (ou la retirer), recharger : bascule immédiate vers l'autre marque, sans redéploiement.
+5. Mettre la constante sur un hôte qui n'est celui d'aucune marque (ex. `hote-inconnu.example.ch`) : aucune marque ne doit résoudre, exactement comme un hôte de requête inconnu — critère de recette n°1 du chapitre B8 du plan de marche.
+6. Contre-épreuve, la plus importante : vérifier qu'aucun `wp-config.php` de production ne porte cette constante. Si elle y apparaissait, `wp_get_environment_type()` y vaut `'production'` et le levier resterait inerte — mais elle ne doit de toute façon jamais y être écrite.
 
 ### 1. Le registre se charge et résout correctement
 

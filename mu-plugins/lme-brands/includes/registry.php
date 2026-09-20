@@ -84,16 +84,64 @@ function lme_brands_resolve_brand_by_host_cached( $host ) {
  * (includes/url-rewrite.php), le filtrage de présentation et la garde de
  * réservation (phase 2) : trois lecteurs, une seule façon de lire l'hôte.
  *
+ * Chantier B8 : sur `staging10.linstantcle.ch`, cet hôte ne correspond à
+ * aucune marque du registre, et c'est voulu (chapitre 4.2 du brief : « on ne
+ * devine jamais une marque »). Ça laisse la préproduction dans l'incapacité
+ * d'exercer le chemin Sexcape Room. Le levier `LME_BRANDS_HOST_OVERRIDE`,
+ * défini dans le `wp-config.php` de la préproduction et absent partout
+ * ailleurs, force l'hôte vu par toute la résolution de marque — sans changer
+ * un octet du registre — mais seulement quand `wp_get_environment_type()`
+ * vaut exactement `'staging'`. La décision elle-même est prise par la
+ * fonction pure lme_brands_resolve_effective_http_host() (includes/core.php),
+ * testable sans WordPress : c'est elle qui garantit que le levier reste
+ * inerte en production, quelle que soit la constante qui y traînerait par
+ * erreur.
+ *
+ * Résolu une seule fois par requête, comme
+ * lme_brands_current_request_brand_host() dans includes/url-rewrite.php :
+ * l'hôte HTTP ne change pas en cours de requête, et ça évite qu'un emploi du
+ * levier journalise une ligne à chaque appel plutôt qu'une par requête.
+ *
  * @return string|null
  */
 function lme_brands_current_http_host() {
-	if ( empty( $_SERVER['HTTP_HOST'] ) ) {
-		return null;
+	static $resolved = false;
+	static $host     = null;
+
+	if ( $resolved ) {
+		return $host;
+	}
+	$resolved = true;
+
+	$request_host = null;
+
+	if ( ! empty( $_SERVER['HTTP_HOST'] ) ) {
+		$request_host = strtolower( (string) wp_unslash( $_SERVER['HTTP_HOST'] ) );
+		$request_host = preg_replace( '/:\d+$/', '', $request_host );
 	}
 
-	$host = strtolower( (string) wp_unslash( $_SERVER['HTTP_HOST'] ) );
+	$override = defined( 'LME_BRANDS_HOST_OVERRIDE' ) ? LME_BRANDS_HOST_OVERRIDE : null;
+	$outcome  = lme_brands_resolve_effective_http_host( $request_host, wp_get_environment_type(), $override );
 
-	return preg_replace( '/:\d+$/', '', $host );
+	if ( $outcome['override_used'] ) {
+		lme_brands_log(
+			'warning',
+			'host_override_used',
+			sprintf(
+				"Levier de préproduction actif : hôte de résolution de marque forcé à '%s' par LME_BRANDS_HOST_OVERRIDE (hôte réel de la requête : %s).",
+				$outcome['host'],
+				null === $request_host ? '(absent)' : $request_host
+			),
+			array(
+				'override_host' => $outcome['host'],
+				'request_host'  => $request_host,
+			)
+		);
+	}
+
+	$host = $outcome['host'];
+
+	return $host;
 }
 
 /**
