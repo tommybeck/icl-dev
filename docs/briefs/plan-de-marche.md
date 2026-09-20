@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.1, 19 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.1 la remet à l'état réel après B4b, B5 et la revue du constat B4b.
+**Version 2.2, 20 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.2 ajoute B8, la recette du moteur, qui manquait au plan depuis l'origine.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -26,7 +26,9 @@ Ce n'est pas une répartition par difficulté, c'est une répartition par **mati
 
 ### Règle du fichier unique
 
-**Un fichier, un auteur.** Code écrit les constats, Cowork écrit les revues et les briefs. `journal-vik.md` fait exception : il appartient à Thomas, et lui seul y écrit.
+**Un fichier, un auteur.** Code écrit les constats, Cowork écrit les revues et les briefs.
+
+**`journal-vik.md` s'ouvre à Code, décision du 19 septembre 2026.** Il appartenait à Thomas seul. Désormais Code y écrit quand un fait est avéré ou quand Thomas annonce une action faite, et Cowork peut fournir les lignes toutes faites. Thomas garde l'autorité : il corrige ou il refuse. Motif : le journal accumulait du retard parce qu'il dépendait d'une seule personne, et c'est ce retard qui a coûté le constat B4b.
 
 **Corollaire appris à nos dépens :** un brief écrit par Cowork hors du dépôt se **déplace** dans `docs/briefs/`, il ne se recopie pas. Deux exemplaires ont déjà divergé, et c'est la copie du dépôt qui était la mauvaise.
 
@@ -38,15 +40,15 @@ Rien d'important ne vit dans une conversation. Une conclusion qui n'est pas écr
 
 ## 2. Les chantiers
 
-| Chantier | Tenu par | État au 19 septembre |
+| Chantier | Tenu par | État au 20 septembre |
 |---|---|---|
 | **A. Tarifs** | Code, Thomas, Cowork | en cours, A1 à A4 faits, A5 à A8 ouverts |
-| **B. Moteur** | Code | phases 1 à 5 faites, B4b fait ; revue de B5 ouverte ; B6 et B7 attendent une décision |
+| **B. Moteur** | Code | phases 1 à 5 faites, B4b fait, **rien n'est déployé** ; B8 est le prochain ; revue de B5 ouverte ; B6 et B7 attendent une décision |
 | **C. Infrastructure** | Thomas | fait, sauf l'observation DMARC en cours |
 | **D. Habillage** | Cowork puis Code | D1 et D2 faits, D3 et D4 ouverts |
 | **E. Surveillance** | Cowork | pas commencé, attend A5 |
 | **F. Contenu des e-mails de Vik** | Thomas | **le plus urgent des ouverts**, F3 avant la première vente des chambres 8, 9 et 10 |
-| **G. Verrou d'hôte** | Cowork puis Code | G1 toujours ouvert, et bloquant |
+| **G. Verrou d'hôte** | Cowork puis Code | G1 fait le 19 septembre, G2 lançable, G3 ajouté |
 | **H. Signalement à l'éditeur** | Cowork puis Thomas | **nouveau**, ouvert par B4b |
 
 ### A. Tarifs
@@ -79,10 +81,32 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B5 | Marquer les rappels avant séjour, par `vikbooking_before_send_mail` | Opus 5, élevé | **livrée** le 17 septembre, commit `c22f5b7`, `constat-b5-rappels.md`, rien de déployé. **Revue Cowork non faite, et elle passe avant B6** |
 | B6 | Parade de la réserve de paiement | Sonnet 5, moyen | ouvert, attend une décision de Thomas |
 | B7 | Identité d'envoi des repas et des bons cadeaux | Sonnet 5, moyen | ouvert, attend une décision de Thomas |
+| B8 | Levier de préproduction et inventaire de déploiement, puis recette de bout en bout | Sonnet 5, moyen | **nouveau, et c'est le prochain** |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
 **Point à vérifier dans la revue de B5 :** le constat justifie de ne pas poser l'adresse de réponse par marque au motif que `reservations@sexcaperoom.ch` n'existe pas encore, alors que C2 est donné pour fait depuis le 15 septembre, groupe Google compris. L'une des deux lignes est périmée.
+
+**Pourquoi B8 manquait.** Le plan dit « ne déploie rien » à chaque phase et ne dit nulle part qui déploie, où, ni selon quelle recette. Sept phases sont écrites et aucune n'est en service. Constaté le 19 septembre : `https://reservation.sexcaperoom.ch/` répond et **sert la page d'accueil de L'Instant Clé**, sans habillage Sexcape Room, tous liens vers `linstantcle.ch`, canonique vers `linstantcle.ch/fr/`, en `index, follow`. Ni la réécriture d'URL de B1 ni l'apparence de D2 n'y sont actives. L'hôte est prêt, le moteur n'y est pas.
+
+**Le point dur de B8.** Le registre résout la marque par l'hôte exact. Sur `staging10.linstantcle.ch` il ne résout rien, et c'est voulu (`registry.php` : « un hôte qui n'est celui d'aucune marque retourne null : on ne devine jamais une marque »). La préproduction ne peut donc pas exercer le chemin Sexcape Room sans un levier explicite : une constante lue seulement quand `wp_get_environment_type()` vaut `staging`, définie dans le `wp-config.php` de la préproduction et absente partout ailleurs.
+
+**Avertissement, avant tout essai de paiement en préproduction.** VikStripe y utilise les clés que porte la base copiée, c'est-à-dire **les clés de production**. Un test écrirait dans le Stripe réel, créerait des sessions parasites et fausserait la réconciliation que B6 doit construire. Basculer la préproduction sur les clés de test d'abord, geste de Thomas.
+
+**Adresse destinataire des essais : une adresse jetable suffit, et c'est décidé.** La recette vérifie les en-têtes et l'identité d'envoi, pas le contenu. D4 ne bloque donc pas la recette.
+
+**La recette, dans l'ordre.**
+
+| # | Ce qu'on vérifie | Où |
+|---|---|---|
+| 1 | L'hôte résout la bonne marque, et un hôte inconnu n'en résout aucune | préproduction |
+| 2 | Les chambres des autres marques ne sont servies par aucune des quatre vues publiques | préproduction |
+| 3 | La garde refuse une chambre hors marque et une chambre désactivée | préproduction |
+| 4 | L'apparence Sexcape Room s'applique, et linstantcle.ch reste intact | préproduction puis production |
+| 5 | Les en-têtes d'une confirmation portent l'expéditeur de la marque, pour les deux marques | préproduction, puis une vraie confirmation en production |
+| 6 | La session Stripe porte la métadonnée de marque, l'URL de retour pointe l'hôte appelant, la page de confirmation s'affiche | préproduction, clés de test |
+| 7 | Le rappel avant séjour part sous la bonne identité | préproduction, après la revue de B5 |
+| 8 | Hors liste blanche, l'hôte redirige vers `sexcaperoom.ch` en 302 | préproduction puis production |
 
 **Le piège qui a coûté le plus cher sur ce chantier**, à savoir avant toute recette d'e-mail : `from_email_force` et `from_name_force` de WP Mail SMTP écrasent en silence l'expéditeur composé par le code. Désactivés sur linstantcle.ch le 15 septembre.
 
@@ -115,9 +139,9 @@ L'en-tête et le pied de page du tunnel restent à construire dans Elementor, pa
 |---|---|---|
 | E1 | Table des valeurs attendues dans Airtable | A5 |
 | E2 | Scénario Make « oracle tarifaire », 06:30, alerte Telegram | E1 |
-| E3 | Scénario « détecteur de silence Stripe » | B4 |
+| E3 | Scénario « détecteur de silence Stripe » | B8 |
 | E4 | Scénario « veille de version Vik » : surveiller **l'empreinte des fichiers**, jamais le numéro de version | rien |
-| E5 | Réservation factice hebdomadaire de bout en bout | B4 |
+| E5 | Réservation factice hebdomadaire de bout en bout | B8 |
 | E6 | Casser volontairement un tarif en préproduction et vérifier que l'alerte arrive | E2 |
 | E7 | Contrôler les règles `rooms.php` des textes conditionnels contre le registre | E1 |
 
@@ -145,10 +169,13 @@ Le brief `brief-verrou-hote-reservation.md` décrit ce chantier depuis le 12 sep
 
 | # | Quoi | Qui | État |
 |---|---|---|---|
-| G1 | Résorber la divergence du brief : la copie du dossier Communication, 125 lignes, est en avance de 31 lignes sur celle du dépôt, 102 lignes | Thomas | **ouvert, et bloquant** |
-| G2 | Implémenter la liste blanche et la redirection conditionnées à l'hôte | Code, Sonnet 5, moyen | attend G1 |
+| G1 | Résorber la divergence du brief entre le dossier Communication et le dépôt | Thomas | **fait le 19 septembre** |
+| G2 | Implémenter la liste blanche et la redirection conditionnées à l'hôte | Code, Sonnet 5, moyen | **lançable** |
+| G3 | Déployer G2 dans la même fenêtre que le moteur | Code puis Thomas | attend G2 et B8 |
 
-**G1 avant G2, sans exception.** La copie du dépôt dit « redirection permanente » là où la bonne dit 302 tant que la recette n'est pas passée, et ignore que le filtre porte sur `get_queried_object_id()` et non sur une chaîne de chemin. Implémenter depuis la mauvaise copie construirait la mauvaise chose.
+**Vérification d'entrée de G2, conservée.** Le brief du dépôt doit contenir la décision du 302 pendant la recette et le filtre par `get_queried_object_id()`. S'il ne les porte pas, c'est l'ancienne copie et il faut s'arrêter.
+
+**Motif de G3 :** tant que la liste blanche n'est pas en service, l'hôte de réservation sert tout le site L'Instant Clé, en `index, follow`. C'est une fuite de marque en production aujourd'hui, pas un risque futur.
 
 ### H. Signalement à l'éditeur
 
@@ -170,36 +197,38 @@ Ouvert par B4b. Le défaut de `stripe.php:365` est celui de E4J et non un artefa
 ## 3. Le séquencement
 
 ```
-fait ───── A1 A2 A3 A4 ──── B1 B2 B3 B4a B4 B4b B5 ──── C1 C2 C3 C4 ──── D1 D2
+fait ── A1 A2 A3 A4 ── B1 B2 B3 B4a B4 B4b B5 ── C1 C2 C3 C4 ── D1 D2 ── G1 ── NitroPack
 
-maintenant ─┬─ geste NitroPack ──────────────── Thomas, quelques minutes, rien ne l'attend
-            ├─ F1, F2, F3 ─────────────────── Thomas, hors chemin critique, urgent
-            ├─ revue B5 ─────────────────────┐           Cowork
-            ├─ H1 ──── H2 ───────────────────┤           Cowork puis Thomas
-            ├─ lecture Stripe ──── décision ──── B6      Thomas puis Code
-            ├─ G1 ──── G2 ───────────────────┐           Thomas puis Code
-            ├─ A6 ──── A7 ──── A8 ──── A5 ───┤── E1 ─ E2 ─ E7 ─ E6
-            ├─ D3, D4 ───────────────────────┤
-            └─ C5, observation DMARC ────────┴─ phase 6, bascule
+maintenant ─┬─ B8 ──── recette ──── D3 ─────┐   Code puis Thomas, le chemin du test
+            ├─ G2 ──── G3 ─────────────────┤   Code puis Thomas
+            ├─ revue B5 ───────────────────┤   Cowork
+            ├─ F1, F2, F3 ─────────────────┤   Thomas, urgent, hors chemin critique
+            ├─ H1 ──── H2 ─────────────────┤   Cowork puis Thomas
+            ├─ lecture Stripe ─ décision ─ B6  Thomas puis Code
+            ├─ A6 ── A7 ── A8 ── A5 ───────┤── E1 ─ E2 ─ E7 ─ E6
+            ├─ D4 ─────────────────────────┤
+            └─ C5, observation DMARC ──────┴─ E3, E5 ── phase 6, bascule
 ```
 
-**Ce qui doit être vrai avant la bascule :** B4 recetté, B5 revu et déployé, G2 en place, D3 validé, D4 livré, E2 et E6 en service, et la réserve de paiement tranchée.
+**Ce qui doit être vrai avant la bascule :** la recette de B8 passée, B5 revu et déployé, G2 et G3 en place, D3 validé, D4 livré, E2 et E6 en service, et la réserve de paiement tranchée.
 
-**Ce qui n'est sur le chemin critique de rien, et doit passer en premier quand même :** le geste NitroPack, le chantier F et la lecture Stripe. Le premier traite le déclencheur de l'incident 1818, le deuxième touche des clients qui paient aujourd'hui, la troisième porte sur de l'argent déjà encaissé. C'est précisément parce qu'ils ne bloquent rien qu'ils risquent d'attendre indéfiniment.
+**Ce qui n'est sur le chemin critique de rien, et doit passer en premier quand même :** le chantier F et la lecture Stripe. Le premier touche des clients qui paient aujourd'hui, la seconde porte sur de l'argent déjà encaissé. C'est précisément parce qu'ils ne bloquent rien qu'ils risquent d'attendre indéfiniment.
 
 ---
 
 ## 4. Ce qui revient à Thomas, par ordre
 
-1. **Sortir la page 845 et toute URL portant un paramètre `sid` de NitroPack.** Quelques minutes, aucun code, aucune clé, aucun fichier de greffon touché. C'est la seule parade qui traite le déclencheur de l'incident 1818 plutôt que son symptôme, et rien ne l'attend. Réglage du tableau de bord NitroPack, à consigner dans `journal-vik.md`.
-2. **Interroger Stripe sur les 137 sessions non soldées**, et relever leur `payment_status`. Lecture seule, aucun effet de bord. C'est la seule façon de savoir si un client a été débité sans réservation. Clé secrète Stripe, donc personne d'autre. Parades classées au §8 de `constat-reserve-paiement.md`, à décider ensuite.
-3. **F1**, une minute.
-4. **G1** : écraser `icl-dev/docs/briefs/brief-verrou-hote-reservation.md` par la copie du dossier Communication, puis supprimer celle-ci.
+**Faits le 19 septembre**, retirés de cette liste : la sortie de la page 845 et des URL à `sid` de NitroPack, et G1.
+
+1. **Déployer B8 en préproduction** quand Code l'aura rendu : copier `mu-plugins/lme-brands/` et `themes/astra-child/` selon l'inventaire de `constat-deploiement-moteur.md`, et ajouter la constante de préproduction dans le `wp-config.php` de `staging10`. C'est ce qui rend le moteur essayable.
+2. **Basculer VikStripe de la préproduction sur les clés de test**, avant le premier essai de paiement. Sans cela, un test écrit dans le Stripe réel.
+3. **Interroger Stripe sur les 137 sessions non soldées**, et relever leur `payment_status`. Lecture seule, aucun effet de bord. C'est la seule façon de savoir si un client a été débité sans réservation. Clé secrète Stripe, donc personne d'autre. Parades classées au §8 de `constat-reserve-paiement.md`, à décider ensuite.
+4. **F1**, une minute.
 5. **F3**, avant le 24 septembre, après avoir tranché l'arbitrage des groupements.
 6. **F2**.
 7. **Lire l'historique des restaurations de Site Tools pour le 15 septembre 2026** : heure et portée, fichiers ou bases. C'est ce qui tranche entre les deux lectures du §4 de `revue-constat-vikstripe-b4b.md`, et cela décide si le souvenir d'un dysfonctionnement du greffon était juste. Lecture seule, quelques clics.
 8. **Dire d'où vient l'archive de `.local/wp-vikstripe-new`** : le téléversement du 15 septembre, ou une reprise chez vikwp.com le 18. Le constat le suppose sans l'établir.
-9. **Compléter `journal-vik.md`** : les enregistrements de shortcode des chambres 7, 8 et 9, la suppression des lignes orphelines 7 et 23, le renommage de la ligne 4, l'ouverture puis la fermeture des chambres 8, 9 et 10, la création de `Fall vacation 2026 (rooms)`, **le téléversement et la confirmation de remplacement du greffon Stripe le 15 septembre 2026 à 09 h 44 15 UTC**, **les restaurations de sauvegarde du même jour avec leur portée**, et, s'il s'en souvient, **l'écriture isolée du 11 décembre 2025 sur `stripe.php`**. Les valeurs tarifaires sont encore lisibles en base ; elles ne le resteront pas.
+9. **Relire et corriger les lignes de `journal-vik.md`** que Cowork et Code y portent désormais, et fournir les deux valeurs qu'eux seuls ne peuvent pas trouver : la portée et l'heure de la restauration du 15 septembre, et le motif de l'écriture du 11 décembre 2025 sur `stripe.php` s'il s'en souvient.
 10. **Charger la clé SSH dans l'agent** à chaque redémarrage du Mac, `ssh-add --apple-use-keychain ~/.ssh/icl_ed25519`, et **le porter dans `handoff-acces-mysql.md`**, qui décrit la clé sans mentionner qu'elle porte une phrase de passe. Sans l'agent, les journaux et la base sont hors d'atteinte, et B4b l'a appris à ses dépens.
 11. **Trancher** : le périmètre de A6, l'identité d'envoi des repas et des bons cadeaux, la parade de paiement, et **le critère de recette n°8 de la phase 4**, le libellé de relevé bancaire. Le point d'accroche des rappels sort de cette liste : il est tranché et posé par B5. Ce dernier n'est pas qu'une question comptable : c'est ce que le client lit sur son relevé de carte, donc une question de discrétion pour une expérience Sexcape Room.
 12. **Déployer B3** quand la recette d'en-têtes est concluante.
@@ -209,6 +238,16 @@ maintenant ─┬─ geste NitroPack ──────────────�
 ## 5. Prompts de lancement
 
 À coller tels quels dans Claude Code, depuis `~/Documents/icl-dev`. Les prompts des tâches déjà exécutées ne sont pas reproduits ici : ils vivent dans l'historique Git et dans les constats qu'ils ont produits. Les prompts de B4, B4b et B5 en sont sortis à la version 2.1.
+
+### B8 — levier de préproduction et inventaire de déploiement. Sonnet 5, effort moyen
+
+> Lis `CLAUDE.md`, `docs/briefs/plan-de-marche.md` §B8 et `docs/briefs/sexcape-room-reservation.md`. Le moteur est écrit et rien n'est en service : `https://reservation.sexcaperoom.ch/` sert aujourd'hui la page d'accueil de L'Instant Clé, sans habillage.
+>
+> Livre deux choses. **Un**, le levier de préproduction : une constante `LME_BRANDS_HOST_OVERRIDE` lue par `lme_brands_current_http_host()` **uniquement** quand `wp_get_environment_type()` vaut `staging`, jamais depuis une requête, et dont l'emploi est journalisé. Le registre ne change pas, et un hôte inconnu continue de ne résoudre aucune marque. Ajoute les tests unitaires correspondants.
+>
+> **Deux**, `docs/briefs/constat-deploiement-moteur.md` : l'inventaire exact de ce qui doit être copié sur le serveur, fichier par fichier, avec sa destination sous `wp-content/`, l'ordre des copies, la vérification qui prouve que chaque morceau est actif, et le retour arrière de chacun. Dis explicitement ce qui, une fois déployé, change le comportement de **linstantcle.ch** et non seulement celui de l'hôte de réservation : c'est le seul risque réel de ce déploiement.
+>
+> **Ne déploie rien, n'écris rien en base, ne lis aucune clé.** Le déploiement et la bascule des clés Stripe de préproduction sont des gestes de Thomas.
 
 ### B6 — parade de la réserve de paiement. Sonnet 5, effort moyen
 
@@ -262,4 +301,5 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.2 | 2026-09-20 | Ajout de B8, la recette du moteur, absente du plan depuis l'origine : le moteur est écrit et rien n'est déployé, constaté sur l'hôte de réservation. Ajout de G3. G1 et le geste NitroPack passés à « fait », retirés du chapitre 4, qui gagne les deux gestes de déploiement. E3 et E5 dépendent désormais de B8. `journal-vik.md` s'ouvre à Code. |
 | 2.1 | 2026-09-19 | Révision après B4b et la revue de son constat. B4, B4b et B5 passés à leur état réel, B5 signalée livrée sans revue. Prémisse de C4 corrigée : il n'existe pas de version plus récente de VikStripe. E4 surveille désormais l'empreinte des fichiers et non le numéro de version. Chantier H ouvert pour le signalement à E4J. Chapitre 4 réordonné, le geste NitroPack en tête. Troisième point au chapitre 6. Bannière de transfert retirée. |
