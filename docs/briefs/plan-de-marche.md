@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.2, 20 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.2 ajoute B8, la recette du moteur, qui manquait au plan depuis l'origine.
+**Version 2.4, 20 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.4 remplace le déploiement à la main par un script, et pose le rafraîchissement de la préproduction avant tout.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -43,7 +43,7 @@ Rien d'important ne vit dans une conversation. Une conclusion qui n'est pas écr
 | Chantier | Tenu par | État au 20 septembre |
 |---|---|---|
 | **A. Tarifs** | Code, Thomas, Cowork | en cours, A1 à A4 faits, A5 à A8 ouverts |
-| **B. Moteur** | Code | phases 1 à 5 faites, B4b fait, **rien n'est déployé** ; B8 est le prochain ; revue de B5 ouverte ; B6 et B7 attendent une décision |
+| **B. Moteur** | Code | B1 à B5, B4a, B4b et B8 faits. **Rien n'est déployé, et le prochain geste est celui de Thomas.** Revue de B5 ouverte ; B6 et B7 attendent une décision |
 | **C. Infrastructure** | Thomas | fait, sauf l'observation DMARC en cours |
 | **D. Habillage** | Cowork puis Code | D1 et D2 faits, D3 et D4 ouverts |
 | **E. Surveillance** | Cowork | pas commencé, attend A5 |
@@ -79,17 +79,37 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B4 | Paiement, retour, page de confirmation | Sonnet 5, moyen | **fait** le 17 septembre, commit `6a82070`, revue faite. Critère de recette n°8 laissé ouvert, décision de Thomas |
 | B4b | Examiner la nouvelle version de VikStripe avant d'écrire à E4J | Opus 5, élevé | **fait** le 18 septembre, commit `6fe7ef0`. C'est la même 2.2.4, le défaut est intact, aucun webhook. Revue du 19 : conclusion tenue, mais « elle n'a jamais tourné » n'est pas démontré |
 | B5 | Marquer les rappels avant séjour, par `vikbooking_before_send_mail` | Opus 5, élevé | **livrée** le 17 septembre, commit `c22f5b7`, `constat-b5-rappels.md`, rien de déployé. **Revue Cowork non faite, et elle passe avant B6** |
-| B6 | Parade de la réserve de paiement | Sonnet 5, moyen | ouvert, attend une décision de Thomas |
+| B6 | Parade de la réserve de paiement | **Opus 5, élevé** | ouvert, attend **la seule décision de la parade**, pas la lecture Stripe |
 | B7 | Identité d'envoi des repas et des bons cadeaux | Sonnet 5, moyen | ouvert, attend une décision de Thomas |
-| B8 | Levier de préproduction et inventaire de déploiement, puis recette de bout en bout | Sonnet 5, moyen | **nouveau, et c'est le prochain** |
+| B8 | Levier de préproduction et inventaire de déploiement | Sonnet 5, moyen | **fait** le 20 septembre, commit `fade08b`, `constat-deploiement-moteur.md`, revue faite. 120 tests au vert |
+| B9 | Script de déploiement, de vérification et de retour arrière | Sonnet 5, moyen | **nouveau, et c'est le prochain** |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert, voir ci-dessous |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
 **Point à vérifier dans la revue de B5 :** le constat justifie de ne pas poser l'adresse de réponse par marque au motif que `reservations@sexcaperoom.ch` n'existe pas encore, alors que C2 est donné pour fait depuis le 15 septembre, groupe Google compris. L'une des deux lignes est périmée.
 
-**Pourquoi B8 manquait.** Le plan dit « ne déploie rien » à chaque phase et ne dit nulle part qui déploie, où, ni selon quelle recette. Sept phases sont écrites et aucune n'est en service. Constaté le 19 septembre : `https://reservation.sexcaperoom.ch/` répond et **sert la page d'accueil de L'Instant Clé**, sans habillage Sexcape Room, tous liens vers `linstantcle.ch`, canonique vers `linstantcle.ch/fr/`, en `index, follow`. Ni la réécriture d'URL de B1 ni l'apparence de D2 n'y sont actives. L'hôte est prêt, le moteur n'y est pas.
+**Pourquoi B8 existait.** Le plan disait « ne déploie rien » à chaque phase et ne disait nulle part qui déploie, où, ni selon quelle recette. Sept phases écrites, aucune en service : le 19 septembre, `https://reservation.sexcaperoom.ch/` servait la page d'accueil de L'Instant Clé, sans habillage.
 
-**Le point dur de B8.** Le registre résout la marque par l'hôte exact. Sur `staging10.linstantcle.ch` il ne résout rien, et c'est voulu (`registry.php` : « un hôte qui n'est celui d'aucune marque retourne null : on ne devine jamais une marque »). La préproduction ne peut donc pas exercer le chemin Sexcape Room sans un levier explicite : une constante lue seulement quand `wp_get_environment_type()` vaut `staging`, définie dans le `wp-config.php` de la préproduction et absente partout ailleurs.
+**Ce que B8 a trouvé, et qui justifie à lui seul le détour.** `themes/astra-child/functions.php` et `style.css` du dépôt n'étaient pas des copies du serveur : ils avaient été écrits le 9 septembre sous l'hypothèse, jamais vérifiée, qu'on récupérerait le vrai thème par SFTP. Les déployer aurait **effacé en silence 7 390 octets de logique de production réelle** — suivi de conversion, règles de référencement, calendrier Vik — sans une seule erreur PHP. Le constat de D2 avait hérité de la même hypothèse et affirme encore aujourd'hui qu'une feuille `astra-child-style` existe sur le serveur, ce qui est faux : le handle réel est `astra-child-theme-css`. **`constat-habillage-tunnel.md` est donc à corriger sur ce point**, sans quoi le prochain lecteur refera l'erreur.
+
+**Ce que B8 a établi et qu'il ne faut pas perdre de vue.** Rien dans ce déploiement n'est isolé à l'hôte de réservation : `lme-brands` est un mu-plugin accroché à des hooks de Vik Booking, installation unique partagée par les deux marques. Dès l'upload, et sur linstantcle.ch aussi, le filtrage de présentation retire un paramètre de chambre étrangère, la garde refuse une réservation hors marque par un 403, et chaque paiement Stripe reçoit une métadonnée de marque. Ce sont les correctifs recherchés, mais ce sont des changements de comportement du parcours de la marque qui vend aujourd'hui. **D'où B10 : le déploiement en production est une décision distincte de la recette, avec sa propre fenêtre**, et non la suite mécanique d'une préproduction verte.
+
+### B9 — le déploiement passe par un script
+
+**Décision du 20 septembre.** Le chapitre 6 de `constat-deploiement-moteur.md` décrit une douzaine de copies et cinq vérifications à la main, à refaire deux fois. Un protocole manuel exécuté deux fois n'est pas exécuté deux fois de la même façon : c'est la classe d'erreur que B8 vient d'éviter de justesse sur le thème. **Le même script tourne sur `staging13` puis en production**, et la symétrie devient une propriété du geste plutôt qu'une intention.
+
+**Ce que le script doit faire, et qui n'est pas une simple copie :**
+
+- **La fusion de `functions.php` n'est pas un remplacement.** Le fichier réel diffère entre les deux environnements et porte de la logique de production. Le script ajoute la ligne `require_once` si elle est absente, ne la duplique jamais, et **refuse de continuer** si le fichier cible ne ressemble pas au thème réel, contrôle de taille du chapitre 6 à l'appui.
+- **Préalables refusants.** Le script s'arrête plutôt que de deviner : `wp_get_environment_type()` conforme à l'environnement visé ; empreintes attendues de ce qui est déjà en place ; et sur la préproduction, **VikStripe en clés de test**, vérifié par le seul préfixe `sk_test_` contre `sk_live_`, jamais par la valeur.
+- **Simulation par défaut.** Sans option explicite, il imprime ce qu'il changerait et ne touche à rien. C'est le mode dans lequel on le lit avant de le croire.
+- **Sauvegarde et retour arrière.** Il prend sa propre sauvegarde avant d'écrire et porte un `--rollback` qui la remet. Le chapitre 7 du constat devient exécutable au lieu d'être une procédure.
+- **Idempotent.** Deux exécutions de suite donnent le même état, et la seconde ne signale rien à changer.
+
+**Qui l'exécute.** Code le lance sur la préproduction. **Thomas seul le lance en production**, la règle de `CLAUDE.md` valant pour l'outil comme pour la main.
+
+**Le point dur de B8.** Le registre résout la marque par l'hôte exact. Sur `staging13.linstantcle.ch` il ne résout rien, et c'est voulu (`registry.php` : « un hôte qui n'est celui d'aucune marque retourne null : on ne devine jamais une marque »). La préproduction ne peut donc pas exercer le chemin Sexcape Room sans un levier explicite : une constante lue seulement quand `wp_get_environment_type()` vaut `staging`, définie dans le `wp-config.php` de la préproduction et absente partout ailleurs.
 
 **Avertissement, avant tout essai de paiement en préproduction.** VikStripe y utilise les clés que porte la base copiée, c'est-à-dire **les clés de production**. Un test écrirait dans le Stripe réel, créerait des sessions parasites et fausserait la réconciliation que B6 doit construire. Basculer la préproduction sur les clés de test d'abord, geste de Thomas.
 
@@ -130,6 +150,7 @@ Trois questions sont closes et ne se rouvrent pas : le changement de domaine pri
 | D2 | Implémenter dans le thème enfant, sous condition d'hôte | Code, Sonnet 5 | **fait**, par le registre et non par une comparaison de chaîne |
 | D3 | Comparer une page du site et une page du tunnel côte à côte | Cowork | ouvert, attend qu'une page du tunnel existe |
 | D4 | Copie des e-mails par marque : corps, signature, images, liens | Cowork | ouvert ; tant qu'il manque, l'alerte `mail_brand_leak` reste allumée |
+| D5 | Corriger `constat-habillage-tunnel.md` : la feuille `astra-child-style` n'existe pas sur le serveur, le handle réel est `astra-child-theme-css` | Code | **nouveau**, établi par B8 |
 
 L'en-tête et le pied de page du tunnel restent à construire dans Elementor, par Ultimate Addons, geste Cowork.
 
@@ -199,7 +220,7 @@ Ouvert par B4b. Le défaut de `stripe.php:365` est celui de E4J et non un artefa
 ```
 fait ── A1 A2 A3 A4 ── B1 B2 B3 B4a B4 B4b B5 ── C1 C2 C3 C4 ── D1 D2 ── G1 ── NitroPack
 
-maintenant ─┬─ B8 ──── recette ──── D3 ─────┐   Code puis Thomas, le chemin du test
+maintenant ─┬─ staging neuf ─ B9 ─ déploiement ─ recette ─ B10 ─ D3 ─┐ le chemin du test
             ├─ G2 ──── G3 ─────────────────┤   Code puis Thomas
             ├─ revue B5 ───────────────────┤   Cowork
             ├─ F1, F2, F3 ─────────────────┤   Thomas, urgent, hors chemin critique
@@ -220,18 +241,20 @@ maintenant ─┬─ B8 ──── recette ──── D3 ─────┐ 
 
 **Faits le 19 septembre**, retirés de cette liste : la sortie de la page 845 et des URL à `sid` de NitroPack, et G1.
 
-1. **Déployer B8 en préproduction** quand Code l'aura rendu : copier `mu-plugins/lme-brands/` et `themes/astra-child/` selon l'inventaire de `constat-deploiement-moteur.md`, et ajouter la constante de préproduction dans le `wp-config.php` de `staging10`. C'est ce qui rend le moteur essayable.
-2. **Basculer VikStripe de la préproduction sur les clés de test**, avant le premier essai de paiement. Sans cela, un test écrit dans le Stripe réel.
-3. **Interroger Stripe sur les 137 sessions non soldées**, et relever leur `payment_status`. Lecture seule, aucun effet de bord. C'est la seule façon de savoir si un client a été débité sans réservation. Clé secrète Stripe, donc personne d'autre. Parades classées au §8 de `constat-reserve-paiement.md`, à décider ensuite.
-4. **F1**, une minute.
-5. **F3**, avant le 24 septembre, après avoir tranché l'arbitrage des groupements.
-6. **F2**.
-7. **Lire l'historique des restaurations de Site Tools pour le 15 septembre 2026** : heure et portée, fichiers ou bases. C'est ce qui tranche entre les deux lectures du §4 de `revue-constat-vikstripe-b4b.md`, et cela décide si le souvenir d'un dysfonctionnement du greffon était juste. Lecture seule, quelques clics.
-8. **Dire d'où vient l'archive de `.local/wp-vikstripe-new`** : le téléversement du 15 septembre, ou une reprise chez vikwp.com le 18. Le constat le suppose sans l'établir.
-9. **Relire et corriger les lignes de `journal-vik.md`** que Cowork et Code y portent désormais, et fournir les deux valeurs qu'eux seuls ne peuvent pas trouver : la portée et l'heure de la restauration du 15 septembre, et le motif de l'écriture du 11 décembre 2025 sur `stripe.php` s'il s'en souvient.
-10. **Charger la clé SSH dans l'agent** à chaque redémarrage du Mac, `ssh-add --apple-use-keychain ~/.ssh/icl_ed25519`, et **le porter dans `handoff-acces-mysql.md`**, qui décrit la clé sans mentionner qu'elle porte une phrase de passe. Sans l'agent, les journaux et la base sont hors d'atteinte, et B4b l'a appris à ses dépens.
-11. **Trancher** : le périmètre de A6, l'identité d'envoi des repas et des bons cadeaux, la parade de paiement, et **le critère de recette n°8 de la phase 4**, le libellé de relevé bancaire. Le point d'accroche des rappels sort de cette liste : il est tranché et posé par B5. Ce dernier n'est pas qu'une question comptable : c'est ce que le client lit sur son relevé de carte, donc une question de discrétion pour une expérience Sexcape Room.
-12. **Déployer B3** quand la recette d'en-têtes est concluante.
+1. **Recréer `staging13` depuis la production.** La préproduction a dérivé depuis sa création, mises à jour et réglages compris, et rien de ce chantier n'y est déployé : **c'est le moment le moins cher pour la refaire**, et une recette menée sur une copie périmée ne prouve rien de la production. À faire **avant** le déploiement.
+2. **Après chaque recréation**, trois gestes qui ne survivent pas à la copie, dans cet ordre : vérifier que `WP_ENVIRONMENT_TYPE` vaut bien `staging` ; **basculer VikStripe sur les clés de test**, la copie ramenant les clés de production avec la base ; reposer la ligne `LME_BRANDS_HOST_OVERRIDE` du chapitre 5 du constat.
+3. **Lancer le script de B9**, d'abord en simulation, puis pour de vrai. Il remplace les copies et les vérifications à la main du constat de déploiement.
+4. **Choisir la parade de paiement**, ce qui débloque B6. Cette décision **n'attend pas la lecture Stripe** : la lecture mesure le dégât passé, la parade arrête le dégât futur. Parades au §8 de `constat-reserve-paiement.md` et au §5 de `constat-incident-1818.md`. Recommandation de Cowork : webhook `checkout.session.completed` en chemin principal, réconciliation planifiée par `metadata.booking_id` en filet, courriel de refus enrichi. Cela suppose que tu poses toi-même dans `wp-config.php` une clé Stripe restreinte en lecture et le secret de signature du webhook.
+5. **Interroger Stripe sur les 137 sessions non soldées**, et relever leur `payment_status`. Lecture seule, aucun effet de bord. C'est la seule façon de savoir si un client a été débité sans réservation. Clé secrète Stripe, donc personne d'autre. Parades classées au §8 de `constat-reserve-paiement.md`, à décider ensuite.
+6. **F1**, une minute.
+7. **F3**, avant le 24 septembre, après avoir tranché l'arbitrage des groupements.
+8. **F2**.
+9. **Lire l'historique des restaurations de Site Tools pour le 15 septembre 2026** : heure et portée, fichiers ou bases. C'est ce qui tranche entre les deux lectures du §4 de `revue-constat-vikstripe-b4b.md`, et cela décide si le souvenir d'un dysfonctionnement du greffon était juste. Lecture seule, quelques clics.
+10. **Dire d'où vient l'archive de `.local/wp-vikstripe-new`** : le téléversement du 15 septembre, ou une reprise chez vikwp.com le 18. Le constat le suppose sans l'établir.
+11. **Relire et corriger les lignes de `journal-vik.md`** que Cowork et Code y portent désormais, et fournir les deux valeurs qu'eux seuls ne peuvent pas trouver : la portée et l'heure de la restauration du 15 septembre, et le motif de l'écriture du 11 décembre 2025 sur `stripe.php` s'il s'en souvient.
+12. **Charger la clé SSH dans l'agent** à chaque redémarrage du Mac, `ssh-add --apple-use-keychain ~/.ssh/icl_ed25519`, et **le porter dans `handoff-acces-mysql.md`**, qui décrit la clé sans mentionner qu'elle porte une phrase de passe. Sans l'agent, les journaux et la base sont hors d'atteinte, et B4b l'a appris à ses dépens.
+13. **Trancher** : le périmètre de A6, l'identité d'envoi des repas et des bons cadeaux, la parade de paiement, et **le critère de recette n°8 de la phase 4**, le libellé de relevé bancaire. Le point d'accroche des rappels sort de cette liste : il est tranché et posé par B5. Ce dernier n'est pas qu'une question comptable : c'est ce que le client lit sur son relevé de carte, donc une question de discrétion pour une expérience Sexcape Room.
+14. **Déployer B3** quand la recette d'en-têtes est concluante.
 
 ---
 
@@ -239,19 +262,27 @@ maintenant ─┬─ B8 ──── recette ──── D3 ─────┐ 
 
 À coller tels quels dans Claude Code, depuis `~/Documents/icl-dev`. Les prompts des tâches déjà exécutées ne sont pas reproduits ici : ils vivent dans l'historique Git et dans les constats qu'ils ont produits. Les prompts de B4, B4b et B5 en sont sortis à la version 2.1.
 
-### B8 — levier de préproduction et inventaire de déploiement. Sonnet 5, effort moyen
+### B9 — script de déploiement, de vérification et de retour arrière. Sonnet 5, effort moyen
 
-> Lis `CLAUDE.md`, `docs/briefs/plan-de-marche.md` §B8 et `docs/briefs/sexcape-room-reservation.md`. Le moteur est écrit et rien n'est en service : `https://reservation.sexcaperoom.ch/` sert aujourd'hui la page d'accueil de L'Instant Clé, sans habillage.
+> Lis `CLAUDE.md`, `docs/briefs/constat-deploiement-moteur.md` en entier et `docs/briefs/plan-de-marche.md` §B9. Le constat décrit un déploiement à la main, à faire deux fois, en préproduction puis en production. Rends-le exécutable : **un seul script, lancé sur les deux environnements**, pour que la symétrie soit une propriété du geste et non une intention.
 >
-> Livre deux choses. **Un**, le levier de préproduction : une constante `LME_BRANDS_HOST_OVERRIDE` lue par `lme_brands_current_http_host()` **uniquement** quand `wp_get_environment_type()` vaut `staging`, jamais depuis une requête, et dont l'emploi est journalisé. Le registre ne change pas, et un hôte inconnu continue de ne résoudre aucune marque. Ajoute les tests unitaires correspondants.
+> **Il simule par défaut** : sans option explicite, il imprime ce qu'il changerait et n'écrit rien. Il **refuse de continuer** plutôt que de deviner, sur au moins ces préalables : `wp_get_environment_type()` conforme à l'environnement visé, empreintes attendues de ce qui est déjà en place, et en préproduction VikStripe en clés de test, vérifié **par le seul préfixe** `sk_test_` contre `sk_live_`, jamais par la valeur, et sans journaliser ce préfixe ailleurs que sur la sortie standard.
 >
-> **Deux**, `docs/briefs/constat-deploiement-moteur.md` : l'inventaire exact de ce qui doit être copié sur le serveur, fichier par fichier, avec sa destination sous `wp-content/`, l'ordre des copies, la vérification qui prouve que chaque morceau est actif, et le retour arrière de chacun. Dis explicitement ce qui, une fois déployé, change le comportement de **linstantcle.ch** et non seulement celui de l'hôte de réservation : c'est le seul risque réel de ce déploiement.
+> **`functions.php` se fusionne, ne se remplace pas** : ajouter la ligne `require_once` si elle est absente, jamais la dupliquer, et s'arrêter si le fichier cible ne ressemble pas au thème réel, contrôle de taille du chapitre 6 à l'appui. **`style.css` du dépôt ne se déploie jamais.**
 >
-> **Ne déploie rien, n'écris rien en base, ne lis aucune clé.** Le déploiement et la bascule des clés Stripe de préproduction sont des gestes de Thomas.
+> Il prend sa propre sauvegarde avant d'écrire, porte un `--rollback` qui la remet, et il est idempotent : deux exécutions de suite donnent le même état et la seconde ne signale rien. Vérifie chaque morceau après l'avoir posé, selon le chapitre 6, et sors en erreur au premier contrôle rouge.
+>
+> **Tu peux le lancer sur la préproduction. Tu ne le lances jamais en production** : c'est un geste de Thomas. Ne lis aucune clé, n'écris rien en base. Écris `docs/briefs/constat-script-deploiement.md` : ce que le script fait, ce qu'il refuse, et ce qu'il ne couvre pas.
 
-### B6 — parade de la réserve de paiement. Sonnet 5, effort moyen
+### B6 — parade de la réserve de paiement. Opus 5, effort élevé
 
-> **À ne lancer qu'une fois la parade choisie par Thomas.** Lis `CLAUDE.md` et `docs/briefs/constat-reserve-paiement.md` en entier, en particulier le §8. Implémente la parade retenue, dans un mu-plugin, **jamais dans le greffon**. Si c'est un webhook, il rejoue `notifypayment` par son `sid` et son `ts` plutôt que d'en dupliquer les dix-sept effets, le contrôleur étant idempotent. Si c'est une réconciliation planifiée, elle rattrape aussi l'existant. Journalise et alerte chaque rattrapage : un paiement récupéré en silence est un incident qu'on n'apprend jamais. Ne déploie rien.
+**Modèle relevé à la version 2.3.** La tâche touche de l'argent, exige l'idempotence, et son code s'exécute pour les deux marques, `constat-deploiement-moteur.md` §8 l'établit. Une erreur y confirme deux fois une réservation ou en confirme une qui n'a pas été payée.
+
+> **À ne lancer qu'une fois la parade choisie par Thomas.** Lis `CLAUDE.md`, `docs/briefs/constat-reserve-paiement.md` en entier dont le §8, `docs/briefs/constat-incident-1818.md` §5, et `docs/briefs/constat-deploiement-moteur.md` §8. Implémente la parade retenue, dans un mu-plugin, **jamais dans le greffon**.
+>
+> Si c'est un webhook, il rejoue `notifypayment` par son `sid` et son `ts` plutôt que d'en dupliquer les dix-sept effets, le contrôleur étant idempotent ; il vérifie la signature Stripe, refuse tout appel non signé, et reste inerte si le secret de signature n'est pas défini. Si c'est une réconciliation planifiée, elle retient la session par `metadata.booking_id` et **jamais** par l'option `stripe_order_<id>`, qui est précisément ce qui a échoué sur la 1818, et elle rattrape aussi l'existant.
+>
+> **Le code s'exécutera pour les deux marques** : dis explicitement, dans ton constat, ce qu'il change au parcours de linstantcle.ch. Journalise et alerte chaque rattrapage : un paiement récupéré en silence est un incident qu'on n'apprend jamais. **Aucune clé n'est lue depuis le dépôt ni écrite nulle part** : elles vivent dans `wp-config.php`, posées par Thomas. Ne déploie rien.
 
 ### B7 — identité d'envoi des repas et des bons cadeaux. Sonnet 5, effort moyen
 
@@ -301,5 +332,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.4 | 2026-09-20 | Le déploiement passe par un script unique lancé sur les deux environnements, tâche B9 ; l'ancien B9 devient B10. Rafraîchissement de `staging13` depuis la production posé en tête du chapitre 4, avec les trois gestes qui ne survivent pas à la copie. |
+| 2.3 | 2026-09-20 | B8 livré, revu et acté, avec sa trouvaille : le thème du dépôt n'était pas une copie du serveur et aurait écrasé 7 390 octets de production. Ajout de B9, le déploiement en production comme décision distincte, et de D5, la correction du constat D2. B6 relevé en Opus 5 effort élevé et son prompt durci. Chapitre 4 : le déploiement en préproduction détaillé, et le choix de la parade ajouté, découplé de la lecture Stripe. |
 | 2.2 | 2026-09-20 | Ajout de B8, la recette du moteur, absente du plan depuis l'origine : le moteur est écrit et rien n'est déployé, constaté sur l'hôte de réservation. Ajout de G3. G1 et le geste NitroPack passés à « fait », retirés du chapitre 4, qui gagne les deux gestes de déploiement. E3 et E5 dépendent désormais de B8. `journal-vik.md` s'ouvre à Code. |
 | 2.1 | 2026-09-19 | Révision après B4b et la revue de son constat. B4, B4b et B5 passés à leur état réel, B5 signalée livrée sans revue. Prémisse de C4 corrigée : il n'existe pas de version plus récente de VikStripe. E4 surveille désormais l'empreinte des fichiers et non le numéro de version. Chantier H ouvert pour le signalement à E4J. Chapitre 4 réordonné, le geste NitroPack en tête. Troisième point au chapitre 6. Bannière de transfert retirée. |
