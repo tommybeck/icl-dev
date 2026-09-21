@@ -65,8 +65,25 @@ STYLE_BASELINE_SIZE=2771
 API_HOST_BASELINE_SIZE=1371
 VRE_BASELINE_SIZE=5592
 
-SINGLE_FILES=("mu-plugins/lme-brands.php")
-COPY_DIRS=("mu-plugins/lme-brands" "themes/astra-child/inc" "themes/astra-child/assets")
+# Racines deployees : TOUT ce que git suit dessous part sur le serveur, sans
+# liste de fichiers figee dans ce script. mu-plugins/lme-brands/ ou
+# themes/astra-child/inc/ peuvent gagner des fichiers sans jamais toucher a
+# deployer-moteur.sh -- une liste figee ici serait elle-meme un risque
+# d'echec silencieux, le jour ou quelqu'un oublierait de la mettre a jour.
+DEPLOY_ROOTS=("mu-plugins" "themes/astra-child")
+
+# Exclusion nominative, deux fichiers seulement : ce sont les placeholders du
+# depot, jamais des copies du theme reel (chapitre 2 du constat de
+# deploiement). Ajouter du vrai contenu de chantier ne se fait jamais sous
+# ces deux noms precis a la racine du theme -- toujours sous inc/ ou assets/
+# -- donc cette exclusion ne grossira pas avec le temps.
+EXCLUDE_FILES=("themes/astra-child/functions.php" "themes/astra-child/style.css")
+
+is_excluded() {
+  local f
+  for f in "${EXCLUDE_FILES[@]}"; do [ "$1" = "$f" ] && return 0; done
+  return 1
+}
 
 rouge() { printf '\033[31m%s\033[0m\n' "$*"; }
 vert()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -328,8 +345,11 @@ case "$MODE" in
     ;;
 
   remove-tree)
+    # Chemins a retirer donnes en arguments par l'appelant local, jamais une
+    # liste figee ici : voir compute_rollback_targets() cote local.
+    shift 2
     WPCONTENT="$BASE/wp-content"
-    for p in mu-plugins/lme-brands.php mu-plugins/lme-brands themes/astra-child/inc themes/astra-child/assets; do
+    for p in "$@"; do
       T="$WPCONTENT/$p"
       if [ -e "$T" ]; then rm -rf "$T"; kv "removed_$p" 1; else kv "removed_$p" 0; fi
     done
@@ -445,22 +465,49 @@ run_preconditions() {
 }
 
 # ---------------------------------------------------------------- manifeste
-# Uniquement les fichiers suivis par git : le dossier de travail peut porter
-# du bruit (.DS_Store, etc.) qui n'a rien a faire sur le serveur. `find`
-# l'aurait copie sans distinction ; `git ls-files` ne connait que le depot.
+# Uniquement les fichiers suivis par git, sous les racines deployees : le
+# dossier de travail peut porter du bruit (.DS_Store, etc.) qui n'a rien a
+# faire sur le serveur, et `find` l'aurait copie sans distinction. La liste
+# vient de l'arborescence du depot a chaque appel, jamais d'une enumeration
+# gardee ici : un fichier ajoute sous une racine deployee part au prochain
+# deploiement sans toucher a ce script.
 build_local_manifest() {
   RELPATHS=()
   LOCAL_HASH=()
-  for f in "${SINGLE_FILES[@]}"; do
-    RELPATHS+=("$f")
-    LOCAL_HASH+=("$(hash_local "$REPO_ROOT/$f")")
-  done
-  for d in "${COPY_DIRS[@]}"; do
+  local root rel
+  for root in "${DEPLOY_ROOTS[@]}"; do
     while IFS= read -r rel; do
       [ -n "$rel" ] || continue
+      is_excluded "$rel" && continue
       RELPATHS+=("$rel")
       LOCAL_HASH+=("$(hash_local "$REPO_ROOT/$rel")")
-    done < <(git -C "$REPO_ROOT" ls-files -- "$d" | sort)
+    done < <(git -C "$REPO_ROOT" ls-files -- "$root" | sort)
+  done
+}
+
+# ------------------------------------------------------- cibles de retrait
+# Pour --rollback : jamais un `rm -rf` de toute une racine deployee (mu-plugins/
+# porte aussi api-host.php et vre-paid-autoconfirm.php, qui ne sont pas a nous
+# -- chapitre 1 du constat de deploiement). On retire seulement les entrees de
+# premier niveau que ce depot possede reellement sous chaque racine, deduites
+# de la meme liste dynamique que la copie : un fichier ou dossier que ce
+# chantier a fait naitre, jamais un voisin qui existait deja.
+compute_rollback_targets() {
+  ROLLBACK_TARGETS=()
+  local root rel relative child seen
+  for root in "${DEPLOY_ROOTS[@]}"; do
+    seen=""
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      is_excluded "$rel" && continue
+      relative="${rel#"$root"/}"
+      child="${relative%%/*}"
+      case " $seen " in
+        *" $child "*) continue ;;
+      esac
+      seen="$seen $child"
+      ROLLBACK_TARGETS+=("$root/$child")
+    done < <(git -C "$REPO_ROOT" ls-files -- "$root" | sort)
   done
 }
 
@@ -495,7 +542,8 @@ compare_manifest() {
 do_rollback() {
   titre "Retour arrière — $HOTE ($ENV)"
   local out
-  out=$(remote_call remove-tree)
+  compute_rollback_targets
+  out=$(remote_call remove-tree "${ROLLBACK_TARGETS[@]}")
   while IFS='=' read -r k v; do
     [ -n "$k" ] || continue
     if [ "$v" = "1" ]; then vert "  retiré : ${k#removed_}"; else info "absent  : ${k#removed_}"; fi

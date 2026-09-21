@@ -8,7 +8,7 @@ du dépôt : `deployer-moteur.sh`.
 **Rien de production n'a été modifié pour écrire ce constat.** Toute
 vérification citée ci-dessous vient d'une lecture directe (SSH en lecture
 seule, `wp-cli`, ou un bac à sable jetable hors de tout `public_html`, décrit
-au chapitre 5 et supprimé avant la fin de la session). La préproduction et la
+au chapitre 4 et supprimé avant la fin de la session). La préproduction et la
 production sont, à l'heure de ce constat, dans l'état exact où B8 les avait
 laissées.
 
@@ -35,9 +35,13 @@ demandait le prompt.
 1. Sauvegarde de `functions.php` réel (`~/.icl-dev-deploy-backups/<hôte>/<horodatage>/`,
    hors de tout dossier servi publiquement).
 2. Copie du mu-plugin et du thème par `rsync --files-from`, à partir de la
-   liste exacte des fichiers **suivis par git** (jamais `find` sur le dossier
-   de travail — voir chapitre 4.1, la trouvaille qui a motivé ce choix).
-   Additif, jamais `--delete`.
+   liste des fichiers **suivis par git sous `mu-plugins/` et
+   `themes/astra-child/`**, recalculée à chaque lancement — jamais une liste
+   de fichiers figée dans le script (voir chapitre 3.4 : pourquoi, et ce que
+   ça change pour `--rollback`). Deux exclusions nominatives seulement,
+   `functions.php` et `style.css` du thème, les deux placeholders que le
+   chapitre 2 du constat de déploiement interdit de déployer. Additif, jamais
+   `--delete`.
 3. Vérification des empreintes `sha256` de chaque fichier copié contre sa
    source locale (chapitre 6.1 du constat de déploiement).
 4. Fusion de `functions.php` : ajoute la ligne `require_once` si elle est
@@ -55,16 +59,19 @@ demandait le prompt.
 7. Sort en erreur au premier contrôle rouge, avec le message qui dit quoi
    corriger.
 
-**`--rollback`** retire dans l'ordre inverse ce que ce script a posé
-(`inc/`, `assets/`, `mu-plugins/lme-brands*`, la ligne du levier), puis
+**`--rollback`** retire dans l'ordre inverse ce que ce script a posé, puis
 restaure `functions.php` depuis la sauvegarde la plus récente pour cet hôte.
+Les entrées à retirer (`mu-plugins/lme-brands.php`, `mu-plugins/lme-brands/`,
+`themes/astra-child/inc/`, `themes/astra-child/assets/`, `README.md` des deux
+dossiers) sont **recalculées de la même façon que la copie**, jamais une
+seconde liste figée qui pourrait diverger de la première — voir chapitre 3.4.
 Sans sauvegarde et sans ligne à retirer, c'est un constat sans effet, pas une
 erreur.
 
 **Idempotent, vérifié.** Deux exécutions de suite : la seconde ne recopie
 rien (empreintes déjà identiques), ne refusionne rien
 (`already_merged=1`), ne repose rien (`override_state=unchanged`) — testé au
-chapitre 5.
+chapitre 4.
 
 ---
 
@@ -80,7 +87,7 @@ est prise côté local, en clair, jamais devinée) :
 | Empreintes de ce qui est déjà en place | tailles de `api-host.php`, `vre-paid-autoconfirm.php`, `style.css`, et de `functions.php` avant fusion, contre les valeurs de `constat-deploiement-moteur.md` chapitre 1 | une taille diffère de la référence |
 | VikStripe en clés de test, en préproduction seulement | `wp db query`, **`LEFT(...,8)`** posé par la requête SQL elle-même — jamais la clé, jamais même son chargement en mémoire côté script — sur la passerelle Stripe **publiée** | le préfixe n'est pas exactement `sk_test_`, ou zéro/plusieurs passerelles Stripe publiées (état ambigu) |
 | Une seule ligne `require_once`, jamais dupliquée | `grep -Fxc` de la ligne exacte | elle apparaît déjà deux fois |
-| `functions.php` ressemble au thème réel avant fusion | taille exacte, chapitre 6 du constat de déploiement | elle diffère de `7390` (constante à mettre à jour si Thomas modifie ce fichier pour une autre raison — voir chapitre 6 ci-dessous) |
+| `functions.php` ressemble au thème réel avant fusion | taille exacte, chapitre 6 du constat de déploiement | elle diffère de `7390` (constante à mettre à jour si Thomas modifie ce fichier pour une autre raison — voir chapitre 5 ci-dessous) |
 | Le levier n'existe jamais en production | présence de la ligne dans `wp-config.php` | elle y est déjà (un ancien geste manuel à corriger, pas un état que ce script doit faire semblant de ne pas voir) |
 | `--override-host` n'a rien à faire en production | argument passé | `--env production` et `--override-host` sont utilisés ensemble |
 | Remplacer un levier déjà posé avec une autre valeur | comparaison de la valeur existante | sans `--forcer-override` : deux essais de recette (marque A, marque B) ne doivent jamais s'écraser en silence |
@@ -97,12 +104,12 @@ une seule lecture.
 
 ---
 
-## 3. Trois trouvailles faites en construisant et testant ce script
+## 3. Quatre trouvailles faites en construisant et testant ce script
 
 Ce script n'a pas été écrit puis livré tel quel : il a été testé, pour de
 vrai, contre la préproduction réelle en lecture seule et contre un bac à
-sable jetable pour les écritures (chapitre 5). Trois faits inattendus en sont
-sortis, et changent la façon dont ce script — et tout script futur qui
+sable jetable pour les écritures (chapitre 4). Quatre faits inattendus en
+sont sortis, et changent la façon dont ce script — et tout script futur qui
 lirait cet environnement — doit se comporter.
 
 ### 3.1 TranslatePress traduit même la sortie de `wp-cli`
@@ -165,6 +172,36 @@ cassant le compteur pour tout ce qui venait après dans le flux `CLE=valeur`.
 Trouvé en testant le mode `functions-facts` contre le bac à sable, avant tout
 usage réel, corrigé par une fonction `count_line()` qui n'enchaîne jamais un
 `||` sur le code de sortie de `grep -c`.
+
+### 3.4 Une liste de fichiers figée dans le script serait elle-même un risque d'échec silencieux
+
+Une première version listait les fichiers à copier par leur chemin exact,
+recopiés depuis le chapitre 3 de `constat-deploiement-moteur.md` : un fichier
+racine et trois dossiers nommés en toutes lettres. Ça fonctionnait, mais ça
+recréait, à l'intérieur du script, exactement le défaut que B9 devait
+corriger dans le déploiement à la main — une liste qui peut se périmer sans
+que rien ne le signale. `mu-plugins/lme-brands/` gagnera des fichiers au fil
+des phases suivantes (B6, B7...) ; un fichier ajouté sous une racine
+déployée mais oublié dans une liste figée du script ne provoquerait aucune
+erreur, juste un manque silencieux à l'exécution suivante.
+
+**Conséquence dans le script :** la liste des fichiers à copier vient
+désormais de `git ls-files`, appelé à chaque lancement sous deux racines
+seulement — `mu-plugins/` et `themes/astra-child/` — moins deux exclusions
+nominatives (`functions.php` et `style.css` du thème, jamais des copies du
+thème réel). Tout ce que git suit sous ces deux racines part au prochain
+déploiement, sans toucher au script ; testé en ajoutant `mu-plugins/README.md`
+et `themes/astra-child/README.md` au dépôt entre deux essais — les deux sont
+apparus dans le plan sans aucune modification de `deployer-moteur.sh`.
+
+`--rollback` a le même risque en miroir : retirer une racine entière
+(`rm -rf wp-content/mu-plugins/`) supprimerait `api-host.php` et
+`vre-paid-autoconfirm.php`, qui ne sont pas à nous (chapitre 1 du constat de
+déploiement). Le retour arrière dérive donc ses cibles de la **même** liste
+dynamique que la copie — jamais une racine entière, jamais une seconde liste
+qui pourrait diverger de la première. Vérifié dans le bac à sable en posant
+un faux `api-host.php` à côté du dépôt de ce chantier avant un
+`--rollback` : le faux fichier a survécu intact, tout le reste a été retiré.
 
 ---
 
@@ -243,4 +280,5 @@ usage réel, corrigé par une fonction `count_line()` qui n'enchaîne jamais un
 
 | Version | Date | Modification |
 |---|---|---|
+| 1.1 | 2026-09-21 | La liste des fichiers à copier et à retirer ne vient plus d'une énumération figée dans le script : elle est recalculée à chaque lancement depuis `git ls-files` sous `mu-plugins/` et `themes/astra-child/`, moins les deux exclusions nominatives. Revérifié en bac à sable : un fichier ajouté au dépôt apparaît sans toucher au script, et `--rollback` épargne un fichier voisin non suivi par ce chantier. |
 | 1.0 | 2026-09-21 | Création. Script `deployer-moteur.sh`, testé en lecture seule contre la préproduction et la production réelles, et en écriture contre un bac à sable jetable sur le même serveur. Trois trouvailles : la traduction automatique de la sortie `wp-cli`, l'accès refusé à la base de préproduction pour l'utilisateur MySQL en lecture seule (contourné par `wp-cli`, jamais par une nouvelle lecture d'identifiants), et un piège de code de sortie sur `grep -c` corrigé avant tout usage réel. |
