@@ -1,10 +1,18 @@
 # Constat — inventaire de déploiement du moteur, chantier B8
 
-Version 1, 20 septembre 2026. Réponse au prompt B8 de `plan-de-marche.md`, à partir de
+Version 2, 20 septembre 2026. Réponse au prompt B8 de `plan-de-marche.md`, à partir de
 `sexcape-room-reservation.md` et de l'état réel du serveur. Chaque fait de ce document vient d'une
 lecture directe, en lecture seule, faite le 20 septembre 2026 — jamais d'une supposition. **Rien
-n'est déployé par ce constat, aucune ligne n'est écrite en base, aucune clé n'a été lue** : chaque
-copie de fichier et chaque écriture dans `wp-config.php` reste un geste de Thomas.
+n'est déployé par ce constat, aucune ligne n'est écrite en base, aucune clé n'a été lue en entier**
+(les valeurs possiblement secrètes ne sont relevées que par empreinte ou par préfixe, jamais en
+clair) : chaque copie de fichier et chaque écriture dans `wp-config.php` reste un geste de Thomas.
+
+La préproduction a été recréée depuis la production entre la version 1 et celle-ci, sous un nouveau
+sous-domaine, **`staging13.linstantcle.ch`** — le précédent, `staging10`, ne fait plus foi. La prose
+de ce document parle désormais de « la préproduction » plutôt que d'un sous-domaine numéroté, qui
+changera à chaque recréation ; le nom littéral n'apparaît plus qu'aux endroits où une commande en a
+besoin. Les quatre faits établis sur l'ancienne copie ont été revérifiés par lecture directe sur la
+nouvelle, chapitre 1 : tous confirmés inchangés. Voir le journal des versions.
 
 ---
 
@@ -14,24 +22,28 @@ Sept phases du moteur sont écrites (B1 à B5, B4a, B4b) et **aucune n'est en se
 `https://reservation.sexcaperoom.ch/` sert aujourd'hui la page d'accueil de L'Instant Clé, sans
 habillage. Le plan disait « ne déploie rien » à chaque phase sans jamais dire qui déploie, où, ni
 selon quelle vérification. Ce document comble ce trou : l'inventaire exact, l'ordre, la preuve
-d'activité, et le retour arrière — pour la cible immédiate, **`staging10.linstantcle.ch`**, jamais
-la production avant que la recette du chapitre B8 du plan de marche soit passée.
+d'activité, et le retour arrière — pour la cible immédiate, **la préproduction**
+(`staging13.linstantcle.ch` aujourd'hui), jamais la production avant que la recette du chapitre B8
+du plan de marche soit passée.
 
 ---
 
 ## 1. Ce qui est déjà sur le serveur, établi par lecture directe
 
-Toutes les valeurs ci-dessous viennent d'une commande `ls`, `wc -c` ou `grep` sur un nom de
-constante explicite, exécutée par SSH en lecture seule (`sg-linstantcle`), ou d'une lecture de
-`sir_options` par clé explicite (jamais par joker, jamais une clé secrète) — conformément à la
-règle absolue n°2 de `CLAUDE.md`.
+Toutes les valeurs ci-dessous viennent d'une commande `ls`, `wc -c`, `sha256sum` ou `grep` sur un
+nom de constante explicite, exécutée par SSH en lecture seule (`sg-linstantcle`), ou d'une lecture
+de `sir_options` ou de la ligne de passerelle Stripe par clé explicite (jamais par joker) — une
+clé possiblement secrète se relevant par son empreinte ou, pour un mode de clé, par son seul
+préfixe, jamais en clair — conformément à la règle absolue n°2 de `CLAUDE.md`. Revérifiées le 20
+septembre 2026 sur la préproduction recréée (`staging13.linstantcle.ch`) : les quatre faits
+ci-dessous sont confirmés inchangés par rapport à la version 1, à l'octet et au caractère près.
 
-- **`staging10.linstantcle.ch` est une copie fidèle du `wp-content` de production** à la date de
-  cette lecture : les deux mêmes mu-plugins existants (voir plus bas), et un `astra-child` dont
-  `functions.php` et `style.css` font exactement les mêmes tailles qu'en production, à l'octet
-  près.
-- **`wp-content/mu-plugins/`** (staging10 et production, identique) : deux fichiers, ni l'un ni
-  l'autre n'est `lme-brands`. Rien de ce chantier n'y est encore.
+- **La préproduction est une copie fidèle du `wp-content` de production** à la date de cette
+  lecture : les deux mêmes mu-plugins existants (voir plus bas), et un `astra-child` dont
+  `functions.php` et `style.css` font exactement les mêmes tailles — et désormais la même empreinte
+  `sha256` — qu'en production, à l'octet près.
+- **`wp-content/mu-plugins/`** (la préproduction et la production, identique) : deux fichiers, ni
+  l'un ni l'autre n'est `lme-brands`. Rien de ce chantier n'y est encore.
   - `api-host.php`, 1371 octets — verrouille `api.linstantcle.ch` à des points d'entrée précis, sur
     `template_redirect` priorité 0. Fonctions préfixées `linstantcle_*`.
   - `vre-paid-autoconfirm.php`, 5592 octets — confirme automatiquement des commandes VikRestaurants
@@ -39,33 +51,41 @@ règle absolue n°2 de `CLAUDE.md`.
     `vikrestaurants_success_payment_transaction` uniquement. Fonctions préfixées `vre_acpo_*`.
   - **Aucune collision** de nom de fonction ni de hook avec `lme-brands`, établie par lecture
     complète des deux fichiers, pas par supposition.
-- **`wp-content/themes/astra-child/functions.php`** (staging10 et production, identique) fait
-  **7390 octets**, daté du 6 mai 2026, et porte déjà de la logique de production sans rapport avec
-  ce chantier : suivi de conversion Google Analytics et Meta Pixel sur les réservations Vik
-  Booking et les commandes VikRestaurants, règles `noindex` par page pour Yoast et pour Rank Math,
-  visibilité de la barre d'administration pour les éditeurs, surlignage des jours de check-in
-  indisponibles sur le calendrier Vik (CSS et JS injectés), balise de vérification de domaine
-  Facebook, autorisation du robot Facebook dans `robots.txt`. **Ce n'est pas le fichier vide que ce
-  dépôt supposait.** Voir chapitre 2.
-- **`wp-content/themes/astra-child/style.css`** (staging10 et production, identique) fait **2771
-  octets** : l'en-tête complet du thème (`Theme Name`, `Author`, `Description`...). Pas davantage
-  un fichier vide.
+- **`wp-content/themes/astra-child/functions.php`** (la préproduction et la production, identique,
+  même empreinte `sha256`) fait **7390 octets**, daté du 6 mai 2026, et porte déjà de la logique de
+  production sans rapport avec ce chantier : suivi de conversion Google Analytics et Meta Pixel sur
+  les réservations Vik Booking et les commandes VikRestaurants, règles `noindex` par page pour
+  Yoast et pour Rank Math, visibilité de la barre d'administration pour les éditeurs, surlignage
+  des jours de check-in indisponibles sur le calendrier Vik (CSS et JS injectés), balise de
+  vérification de domaine Facebook, autorisation du robot Facebook dans `robots.txt`. **Ce n'est
+  pas le fichier vide que ce dépôt supposait.** Voir chapitre 2.
+- **`wp-content/themes/astra-child/style.css`** (la préproduction et la production, identique,
+  même empreinte `sha256`) fait **2771 octets** : l'en-tête complet du thème (`Theme Name`,
+  `Author`, `Description`...). Pas davantage un fichier vide.
 - **`sir_options`**, lu par clé explicite (`option_name IN ('current_theme','template','stylesheet')`) :
   `current_theme = Astra Child`, `template = astra`, `stylesheet = astra-child`. **`astra-child`
   est déjà le thème actif sur linstantcle.ch**, sans étape d'activation à faire dans
   l'administration.
-- **`wp-config.php` de staging10**, lu par nom de constante explicite (jamais le fichier entier,
-  règle absolue n°2) : `WP_ENVIRONMENT_TYPE` y vaut déjà `'staging'`, posé par le système de
-  staging SiteGround lui-même (« Added by SiteGround WordPress Staging system »). **Rien à ajouter
-  de ce côté.** `LME_BRANDS_HOST_OVERRIDE` n'y existe pas encore.
+- **`wp-config.php` de la préproduction**, lu par nom de constante explicite (jamais le fichier
+  entier, règle absolue n°2) : `WP_ENVIRONMENT_TYPE` y vaut toujours `'staging'`, posé par le
+  système de staging SiteGround lui-même (« Added by SiteGround WordPress Staging system ») — la
+  recréation du 20 septembre 2026 l'a reposé à l'identique. **Rien à ajouter de ce côté.**
+  `LME_BRANDS_HOST_OVERRIDE` n'y existe pas encore.
 - **`wp-config.php` de production**, même méthode de lecture : ne définit `WP_ENVIRONMENT_TYPE`
   nulle part. `wp_get_environment_type()` y retourne donc `'production'`, la valeur par défaut de
   WordPress. **Le levier de préproduction y est donc structurellement inerte**, sans rien à ajouter
   ni à vérifier pour s'en assurer — voir `lme_brands_resolve_effective_http_host()`,
   `includes/core.php`. `LME_BRANDS_HOST_OVERRIDE` n'y existe pas non plus.
-- PHP **8.2.33** sur le serveur qui porte linstantcle.ch et staging10 : `WeakMap` est disponible,
-  `lme_brands_mail_wrapper_decided()` (`includes/mail-brand.php`) l'utilisera, jamais son repli
-  `SplObjectStorage`.
+- **VikStripe sur la préproduction utilise toujours les clés de production**, revérifié par leur
+  seul préfixe (huit premiers caractères, jamais la clé entière) : la passerelle publiée
+  (`sir_vikbooking_gpayments`, id 3, « Pay (now or later) ») porte des clés `sk_live_…` et
+  `pk_live_…` ; la passerelle de test qui l'accompagne dans la même table (id 6, « Stripe - Keep it
+  for tests », non publiée) porte `sk_test_…` et `pk_test_…`. La recréation de la préproduction n'a
+  rien changé à cet état : copiées avec la base, comme au chapitre 9. **À basculer sur les clés de
+  test avant tout essai de paiement**, geste de Thomas.
+- PHP **8.2.33** sur le serveur qui porte linstantcle.ch et la préproduction : `WeakMap` est
+  disponible, `lme_brands_mail_wrapper_decided()` (`includes/mail-brand.php`) l'utilisera, jamais
+  son repli `SplObjectStorage`.
 
 ---
 
@@ -169,17 +189,17 @@ Recalculables depuis ce dépôt avec `shasum -a 256 <fichier>`, et depuis le ser
    provoquerait une erreur fatale PHP sur **tout** le site, linstantcle.ch compris — voir chapitre
    8.
 3. **Vérifier l'écran de santé** (Outils → Santé lme-brands) avant de toucher à `wp-config.php` :
-   il ne dépend d'aucune résolution d'hôte, donc il fonctionne dès l'étape 1, sur staging10 comme en
+   il ne dépend d'aucune résolution d'hôte, donc il fonctionne dès l'étape 1, sur la préproduction comme en
    production. Les sept chambres vendues doivent apparaître synchronisées avant d'aller plus loin.
-4. **Le levier de préproduction en dernier**, sur `staging10` seulement (chapitre 5) : une fois 1 à
+4. **Le levier de préproduction en dernier**, sur la préproduction seulement (chapitre 5) : une fois 1 à
    3 en place et vérifiés, pour que le tout premier instant où le levier devient actif trouve déjà
    tout ce dont il dépend.
 
 ---
 
-## 5. Mise en service du levier — `staging10` seulement, jamais ailleurs
+## 5. Mise en service du levier — la préproduction seulement, jamais ailleurs
 
-`WP_ENVIRONMENT_TYPE` vaut déjà `'staging'` sur `staging10` (chapitre 1) : il ne reste qu'une seule
+`WP_ENVIRONMENT_TYPE` vaut déjà `'staging'` sur la préproduction (chapitre 1) : il ne reste qu'une seule
 ligne à ajouter à son `wp-config.php`, hors du bloc géré par SiteGround pour ne pas la perdre à une
 resynchronisation :
 
@@ -199,7 +219,7 @@ par défaut, donc `lme_brands_resolve_effective_http_host()` l'ignorerait de tou
 
 **1. Le mu-plugin est présent et intact.** Depuis le serveur : `sha256sum` (ou `shasum -a 256`) sur
 chacun des douze fichiers du chapitre 3, comparé à la table du chapitre 3. Puis charger n'importe
-quelle page front de staging10 et vérifier `debug.log` : aucune erreur fatale, aucune ligne
+quelle page front de la préproduction et vérifier `debug.log` : aucune erreur fatale, aucune ligne
 `[lme-brands]` inattendue (une ligne `[config_invalid]` signalerait un registre corrompu par le
 transfert).
 
@@ -214,7 +234,7 @@ donner **7390 + la longueur de la ligne ajoutée**, jamais 749 ni une valeur pro
 nombre proche indiquerait un écrasement plutôt qu'une fusion, et il faut alors restaurer
 immédiatement depuis la sauvegarde (chapitre 7).
 
-**4. L'apparence Sexcape Room s'active sous le levier, et seulement sous lui.** Sur staging10,
+**4. L'apparence Sexcape Room s'active sous le levier, et seulement sous lui.** Sur la préproduction,
 `LME_BRANDS_HOST_OVERRIDE` réglé sur `reservation.sexcaperoom.ch` : le code source d'une page porte
 les jetons `--srlm-*`, les trois familles de police (`Marcellus`, `Jost`, `Lora`) se chargent
 (réseau de l'onglet Network du navigateur, fichiers `.woff2` de ce dossier). Basculer la constante
@@ -241,7 +261,7 @@ réécriture d'URL. Couvert par le test automatisé
   arrière est chirurgical, sans risque pour le suivi de conversion, les règles `noindex` ou le reste
   du chapitre 1.
 - **Le levier** : retirer (ou mettre en commentaire) la ligne `define( 'LME_BRANDS_HOST_OVERRIDE',
-  ... )` du `wp-config.php` de staging10. Sans effet ailleurs, puisqu'elle n'existe nulle part
+  ... )` du `wp-config.php` de la préproduction. Sans effet ailleurs, puisqu'elle n'existe nulle part
   ailleurs.
 - **Sauvegarde avant écriture, règle absolue n°3.** Avant l'étape 2 de l'ordre des copies (fusion
   dans `functions.php`), copier le fichier réel tel quel (`cp functions.php
@@ -282,7 +302,7 @@ par une frontière physique entre deux sites.
    au lieu d'aboutir. C'est le correctif recherché, mais c'est un changement de comportement
    fonctionnel immédiat et réel du parcours de réservation de linstantcle.ch, pas seulement de
    celui de Sexcape Room. Une chambre désactivée (`avail = 0`, chambres de test 5 et 6) est
-   également refusée dès l'upload, sur **n'importe quel hôte**, y compris `staging10` lui-même,
+   également refusée dès l'upload, sur **n'importe quel hôte**, y compris la préproduction elle-même,
    sans qu'aucune marque n'ait besoin de se résoudre pour ce refus précis.
 4. **Les e-mails de toute réservation linstantcle.ch passent, dès l'upload, par la même réécriture
    que ceux de Sexcape Room** (`includes/mail-brand.php`, `vikbooking_before_send_booking_mail` et
@@ -328,7 +348,7 @@ production (4, 5) — mais aucun n'est scopé à `reservation.sexcaperoom.ch` pa
 - **L'exclusion NitroPack et cache dynamique SiteGround** du tunnel (chapitre 4.6 du brief
   principal) reste à faire séparément, geste de Thomas dans le tableau de bord de chaque service.
 - **Les clés Stripe de préproduction.** Avertissement déjà posé dans `plan-de-marche.md` : VikStripe
-  sur staging10 utilise aujourd'hui les clés de production, copiées avec la base. Basculer sur les
+  sur la préproduction utilise aujourd'hui les clés de production, copiées avec la base. Basculer sur les
   clés de test **avant** tout essai de paiement, geste de Thomas, avant la ligne 6 de la recette.
 
 ---
@@ -338,3 +358,4 @@ production (4, 5) — mais aucun n'est scopé à `reservation.sexcaperoom.ch` pa
 | Version | Date | Modification |
 |---|---|---|
 | 1.0 | 2026-09-20 | Création. Inventaire de déploiement établi par lecture directe du serveur (SSH, lecture seule ; `sir_options` par clé explicite ; `wp-config.php` par nom de constante explicite, jamais lu en entier). Correction du dépôt : `functions.php` et `style.css` d'`astra-child` n'étaient pas des copies du serveur et auraient écrasé en silence une logique de production réelle — corrigés avant ce constat. |
+| 2.0 | 2026-09-20 | Préproduction recréée depuis la production, nouveau sous-domaine `staging13.linstantcle.ch` (l'ancien `staging10` ne fait plus foi). Prose repassée de « `staging10.linstantcle.ch` » à « la préproduction », nom littéral gardé seulement là où utile. Quatre faits revérifiés par lecture directe en lecture seule sur la nouvelle copie, tous confirmés inchangés : date de la copie (20 septembre 2026, création du dossier `staging13` à 08:43 UTC) ; tailles et empreintes `sha256` des quatre fichiers du chapitre 1 (`mu-plugins/api-host.php` 1371 o, `mu-plugins/vre-paid-autoconfirm.php` 5592 o, `astra-child/functions.php` 7390 o, `astra-child/style.css` 2771 o — empreintes identiques à la production) ; `WP_ENVIRONMENT_TYPE` toujours `'staging'` ; mode des clés VikStripe revérifié par leur seul préfixe (huit premiers caractères) sur `sir_vikbooking_gpayments` : passerelle publiée en `sk_live_…`/`pk_live_…`, passerelle de test non publiée en `sk_test_…`/`pk_test_…` — inchangé. |
