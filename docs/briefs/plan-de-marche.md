@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.9, 22 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.9 acte B9b et B9c : la phase 4 n'avait jamais fonctionné, elle est corrigée et reste à recetter. Elle ouvre B9d, la vérification des signatures de crochets.
+**Version 2.10, 22 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.10 acte B9d et le correctif du script : plus rien ne retient le redéploiement en préproduction et la recette en deux passes.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -85,8 +85,8 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B9 | Script de déploiement, de vérification et de retour arrière | Sonnet 5, moyen | **fait** le 21 septembre, commits `289339e` et `125e65b`, `constat-script-deploiement.md`, revue faite. Une réserve avant la production, ci-dessous |
 | B9b | Réécriture d'URL en préproduction, et constat de l'erreur fatale | Sonnet 5, moyen | **fait** le 22 septembre, commit `cb46ba8`, deux constats, revue faite |
 | B9c | Corriger `payment-brand.php`, et la prémisse fausse qui l'a produit | Sonnet 5, moyen | **fait** le 22 septembre, commit `f7a740a`, `constat-correctif-signature-paiement.md`, revue faite |
-| B9d | Vérifier la signature réelle de chaque crochet auquel `lme-brands` s'accroche | Sonnet 5, faible | **nouveau**, avant B10 |
-| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Trois prérequis : B9d, l'exclusion `tests/`, et la recette en deux passes** |
+| B9d | Vérifier la signature réelle de chaque crochet auquel `lme-brands` s'accroche | Sonnet 5, faible | **fait** le 22 septembre, commit `4a34466`, `constat-signatures-crochets.md`, revue faite. Treize crochets, **aucun écart** hors celui déjà corrigé |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Seul prérequis restant : la recette en deux passes** |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
@@ -155,7 +155,17 @@ Les deux vont à **B9b**, brief `brief-correctif-levier-et-fatal-paiement.md`.
 
 **Ce qui reste.** La phase 4 est corrigée, elle n'est pas recettée : elle n'a jamais tourné une seule fois de bout en bout. La vérification n°6 sera la première à la mettre à l'épreuve.
 
-### B9d — vérifier la signature réelle de chaque crochet
+### B9d — les treize crochets sont vérifiés, et la règle reste
+
+**Fait le 22 septembre, `constat-signatures-crochets.md`.** Les treize `add_action` et `add_filter` de `lme-brands` sont passés en revue, forme reçue établie par lecture croisée de l'appel — Vik ou cœur WordPress — **et** du traitement du cœur, `do_action()`, `do_action_ref_array()`, `apply_filters()` et la troncature par `accepted_args`. **Aucun écart**, hors celui déjà corrigé par B9c. La garde de réservation, celle dont un écart aurait cassé toute création de réservation des deux marques, reçoit bien ses cinq arguments dans l'ordre déclaré, sur les deux branches de `saveorder()`.
+
+**Deux limites à garder en tête.** L'inventaire vérifie la **forme** des arguments, pas le type de retour attendu : un filtre comme `upload_dir` doit rendre un tableau aux mêmes clés, et rien ici ne le prouve. C'est la recette qui le couvre. Et c'est un instantané : **tout crochet ajouté par la suite repasse par cette vérification**, à porter dans `mu-plugins/lme-brands/README.md` pour que la règle survive à la mémoire.
+
+### Le script est corrigé — commit `6bb5d18`
+
+Deux défauts levés dans la même passe. Sa vérification d'apparence suit désormais la redirection 301 de TranslatePress, `curl -L`, au lieu de lire un corps vide et de conclure à l'absence des jetons ; **un succès bruyamment nié est le symétrique de la règle « aucun échec silencieux »**, et toute vérification qui conclut d'une absence se relit de la même façon. Et le motif `tests/` est exclu du déploiement, par motif et non par énumération, ce qui lève la réserve posée sur B9.
+
+### Réserve sur B9, à lever avant la production, pas avant la préproduction
 
 **Pourquoi, et c'est la vraie leçon.** Cowork a d'abord écrit que « les 120 tests passaient parce qu'ils simulaient la forme fausse ». **C'est faux, et c'était écrit sans vérification** : les tests d'alors ne touchaient pas du tout `payment-brand.php`, ni sous sa forme fausse ni sous aucune forme. La faute est du même ordre que celle qu'elle décrivait.
 
@@ -165,13 +175,13 @@ La leçon réelle est plus large. **Une fonction accrochée à un crochet tiers 
 
 **Le risque couvert.** Un rappel qui se trompe de forme ne dégrade pas, il lève une erreur fatale. Sur la garde de réservation, cela casserait toute création de réservation des deux marques, comme le paiement vient de l'être.
 
-### Réserve sur B9, à lever avant la production, pas avant la préproduction
+### Pour mémoire — la réserve sur B9, levée le 22 septembre
 
 Le script tire sa liste de `git ls-files`, jamais d'une énumération figée : c'est la bonne décision, et elle respecte la leçon du 15 septembre, un fichier présent n'est pas un fichier suivi. Elle a une conséquence que le constat ne relève pas : **`mu-plugins/lme-brands/tests/test-core.php` est suivi par Git, donc il part sur le serveur.**
 
 WordPress ne le charge pas, les mu-plugins n'étant chargés qu'à la racine de `mu-plugins/`. Mais le fichier reste **exécutable par une simple requête HTTP** sur `wp-content/mu-plugins/lme-brands/tests/test-core.php`, et il ne porte aucune garde `ABSPATH`, volontairement, puisqu'il doit tourner hors de WordPress. Il n'expose ni secret ni écriture, seulement des fonctions pures et, en cas d'échec, des chemins de fichiers.
 
-**Correctif : exclure le motif `tests/` sous les racines déployées.** C'est un motif et non une énumération, donc il ne grossit pas avec le temps, et l'argument de B9 contre les listes figées ne s'y applique pas. Sans urgence pour la préproduction, **obligatoire avant B10**.
+**Correctif appliqué le 22 septembre**, commit `6bb5d18` : le motif `tests/` est exclu sous les racines déployées. Un motif, pas une énumération, donc l'argument de B9 contre les listes figées ne s'y applique pas.
 
 ### La parade de paiement est tranchée — décision du 21 septembre
 
@@ -279,7 +289,7 @@ Ouvert par B4b. Le défaut de `stripe.php:365` est celui de E4J et non un artefa
 ```
 fait ── A1 A2 A3 A4 ── B1 B2 B3 B4a B4 B4b B5 ── C1 C2 C3 C4 ── D1 D2 ── G1 ── NitroPack
 
-maintenant ─┬─ B9d ─ redéploiement ─ recette 2 passes ─ exclusion tests/ ─ B10 ─ D3 ─┐ le test
+maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ───────┐ le test
             ├─ G2 ──── G3 ─────────────────┤   Code puis Thomas
             ├─ revue B5 ───────────────────┤   Cowork
             ├─ F1, F2, F3 ─────────────────┤   Thomas, urgent, hors chemin critique
@@ -321,16 +331,6 @@ maintenant ─┬─ B9d ─ redéploiement ─ recette 2 passes ─ exclusion t
 ## 5. Prompts de lancement
 
 À coller tels quels dans Claude Code, depuis `~/Documents/icl-dev`. Les prompts des tâches déjà exécutées ne sont pas reproduits ici : ils vivent dans l'historique Git et dans les constats qu'ils ont produits. Les prompts de B4, B4b et B5 en sont sortis à la version 2.1.
-
-### B9d — signatures de crochets. Sonnet 5, effort faible
-
-> Lis `CLAUDE.md`, `docs/briefs/constat-correctif-signature-paiement.md` et `docs/briefs/constat-phase-0.md` §Q5. La phase 4 a été cassée par une signature de rappel supposée à partir du seul code de Vik, sans tenir compte de ce que WordPress fait des arguments avant de les livrer.
->
-> Fais l'inventaire de **tous** les crochets auxquels `mu-plugins/lme-brands/` s'accroche, `add_action` comme `add_filter`. Pour chacun : le nom du crochet, le fichier et la ligne de l'appel côté Vik ou côté WordPress, la signature **réellement reçue** par notre rappel, et la signature que notre rappel déclare. Établis la forme reçue en lisant l'appel **et** son traitement par le cœur de WordPress, jamais l'un sans l'autre.
->
-> **Nomme tout écart**, et dis pour chacun s'il produirait une erreur fatale ou une dégradation silencieuse. Ne corrige rien dans cette passe : la liste d'abord, les correctifs ensuite, sur décision.
->
-> **Ne déploie rien, n'écris rien en base, ne lis aucune clé.** Écris `docs/briefs/constat-signatures-crochets.md`. Commit et poussée après revue.
 
 ### B9 — script de déploiement, de vérification et de retour arrière. Sonnet 5, effort moyen
 
@@ -404,6 +404,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.10 | 2026-09-22 | B9d livré et revu : treize crochets, aucun écart hors celui déjà corrigé, et la règle passe au README pour survivre à la mémoire. Le script est corrigé, redirection TranslatePress suivie et motif `tests/` exclu, ce qui lève la réserve sur B9. Plus rien ne retient le redéploiement et la recette. |
 | 2.9 | 2026-09-22 | B9b et B9c livrés et revus. La phase 4 n'avait jamais fonctionné : `payment-brand.php` levait une erreur fatale sur toute tentative de paiement, les deux marques, les deux environnements, par une prémisse fausse de `constat-phase-0.md` §Q5 corrigée à sa source. Les deux correctifs d'hôte visent désormais l'hôte réel. Ajout de B9d, la vérification des signatures de crochets, avant B10. La 2.8, qui n'a pas survécu, affirmait à tort que les 120 tests validaient la forme fausse : ils ne couvraient pas cette fonction du tout. |
 | 2.7 | 2026-09-21 | Première recette menée sur `staging13`. La recette passe en deux passes, une par marque, la vérification n°4 n'étant pas vérifiable autrement. Ajout de B9b : la réécriture d'URL de la préproduction pointe vers la production, et une erreur fatale coupe la page de paiement. |
 | 2.6 | 2026-09-21 | La recette du moteur gagne un titre de section : ses huit vérifications existaient depuis la 2.2 mais sans en-tête, dans le corps du chantier B, et les renvois parlaient d'un « chapitre B8 » qui n'a jamais existé. Renvois corrigés. |
