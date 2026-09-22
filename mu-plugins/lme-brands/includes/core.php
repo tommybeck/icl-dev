@@ -455,6 +455,88 @@ function lme_brands_resolve_effective_http_host( $request_host, $environment_typ
 }
 
 /**
+ * Normalise un hôte HTTP brut (`$_SERVER['HTTP_HOST']`) : minuscules, port
+ * retiré. Partagé par les deux lecteurs d'hôte d'includes/registry.php —
+ * lme_brands_current_http_host() (hôte éventuellement soumis au levier de
+ * préproduction B8) et lme_brands_current_raw_http_host() (hôte réel,
+ * jamais soumis au levier) — pour qu'une seule fonction décide de ce
+ * qu'est un hôte HTTP « propre », comme une seule fonction décide déjà de
+ * la résolution de marque par hôte (lme_brands_resolve_brand_by_host()).
+ *
+ * @param mixed $raw_host
+ * @return string|null
+ */
+function lme_brands_normalize_http_host( $raw_host ) {
+	if ( ! is_string( $raw_host ) || '' === $raw_host ) {
+		return null;
+	}
+
+	$host = strtolower( $raw_host );
+	$host = preg_replace( '/:\d+$/', '', $host );
+
+	return '' === $host ? null : $host;
+}
+
+/**
+ * Hôte cible de la réécriture d'URL (includes/url-rewrite.php), pour une
+ * requête dont l'hôte *effectif* de résolution de marque a déjà déterminé
+ * qu'une marque gouverne cette requête.
+ *
+ * Correctif du 22 septembre 2026, docs/briefs/brief-correctif-levier-et-fatal-paiement.md
+ * chapitre 2 : la cible n'est **jamais** l'hôte déclaré au registre pour la
+ * marque résolue (`$config['brands'][$brand_key]['host']`, l'ancien
+ * comportement). En production les deux coïncident toujours : Sur
+ * l'hôte linstantcle.ch, resolve_brand_by_host() ne peut matcher `$effective_host`
+ * à une marque qu'en le comparant, exactement, au `host` que cette marque
+ * déclare — donc `$effective_host` et le `host` du registre sont
+ * nécessairement égaux à ce point, par construction. Mais sous le levier de
+ * préproduction (chantier B8), `$effective_host` est une valeur de
+ * simulation — le `host` d'une marque, forcé pour activer ses règles
+ * métier — et non l'hôte qui sert réellement la requête. Cibler le registre
+ * revient alors à réécrire les URL de la préproduction vers la production :
+ * le défaut observé le 21 septembre 2026 sur `staging13.linstantcle.ch`,
+ * dont les feuilles de style se chargeaient depuis `reservation.sexcaperoom.ch`.
+ *
+ * La cible correcte est toujours `$raw_host` : l'hôte HTTP réel de la
+ * requête, jamais soumis au levier. Il est égal à `$effective_host` en
+ * production (où le levier est toujours inerte, lme_brands_resolve_effective_http_host())
+ * et ne s'en distingue qu'en préproduction sous le levier — exactement là
+ * où la distinction importe. Utiliser `$raw_host` ne change donc rien au
+ * comportement de production (déjà établi par
+ * docs/briefs/constat-deploiement-moteur.md §8, point 1 : la réécriture est
+ * un no-op sur son propre hôte) et corrige la préproduction : la cible y
+ * devient l'hôte réel de la préproduction, donc `lme_brands_swap_url_host()`
+ * n'y change rien non plus — un no-op vérifiable, la réécriture restant
+ * exercée de bout en bout (résolution de marque, calcul de cible,
+ * comparaison) plutôt que court-circuitée.
+ *
+ * @param array       $config
+ * @param string|null $effective_host Hôte de résolution de marque
+ *                                     (lme_brands_current_http_host()),
+ *                                     potentiellement forcé par le levier.
+ * @param string|null $raw_host       Hôte HTTP réel de la requête
+ *                                     (lme_brands_current_raw_http_host()),
+ *                                     jamais forcé.
+ * @return string|null L'hôte cible de la réécriture, ou null si aucune
+ *                      réécriture ne doit s'appliquer.
+ */
+function lme_brands_resolve_url_rewrite_target( array $config, $effective_host, $raw_host ) {
+	if ( null === $effective_host ) {
+		return null;
+	}
+
+	if ( null === lme_brands_resolve_brand_by_host( $config, $effective_host ) ) {
+		return null;
+	}
+
+	if ( ! is_string( $raw_host ) || '' === $raw_host ) {
+		return null;
+	}
+
+	return $raw_host;
+}
+
+/**
  * Découpe une liste d'identifiants reçue en paramètre de requête : tableau
  * (soumission `nom[]=...`) ou chaîne délimitée par virgule ou point-virgule
  * (format des jetons idrooms/idcat de Vik, constat-phase-0.md Q6). Toute

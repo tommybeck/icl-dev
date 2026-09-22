@@ -332,6 +332,82 @@ lme_brands_test_assert(
 	"non-régression : le levier de préproduction n'invente jamais une marque pour un hôte de substitution inconnu du registre"
 );
 
+// --- Correctif du 22 septembre 2026 : cible de la réécriture d'URL ------------
+//
+// brief-correctif-levier-et-fatal-paiement.md chapitre 2. Avant ce
+// correctif, includes/url-rewrite.php visait le `host` déclaré au registre
+// pour la marque résolue, y compris sous le levier de préproduction B8 —
+// où cet hôte est celui de la PRODUCTION. Constaté le 21 septembre 2026 :
+// staging13.linstantcle.ch chargeait ses feuilles de style depuis
+// reservation.sexcaperoom.ch. lme_brands_resolve_url_rewrite_target()
+// remplace ce lookup par l'hôte HTTP réel de la requête, jamais soumis au
+// levier.
+
+echo "\nlme_brands_normalize_http_host()\n";
+
+lme_brands_test_assert(
+	'linstantcle.ch' === lme_brands_normalize_http_host( 'linstantcle.ch' ),
+	'normalize_http_host : un hôte déjà propre reste inchangé'
+);
+lme_brands_test_assert(
+	'linstantcle.ch' === lme_brands_normalize_http_host( 'LinstantCle.CH' ),
+	'normalize_http_host : ramené en minuscules'
+);
+lme_brands_test_assert(
+	'staging13.linstantcle.ch' === lme_brands_normalize_http_host( 'staging13.linstantcle.ch:8443' ),
+	'normalize_http_host : le port explicite est retiré'
+);
+lme_brands_test_assert(
+	null === lme_brands_normalize_http_host( '' ) && null === lme_brands_normalize_http_host( null ) && null === lme_brands_normalize_http_host( array() ),
+	"normalize_http_host : une valeur vide ou non textuelle donne null, jamais une chaîne vide"
+);
+
+echo "\nlme_brands_resolve_url_rewrite_target()\n";
+
+$config = lme_brands_test_sample_config();
+
+// C'est le défaut lui-même : sous le levier, l'hôte effectif de résolution
+// (celui d'une marque, forcé) ne doit jamais devenir la cible — seul l'hôte
+// réel de la préproduction doit l'être.
+lme_brands_test_assert(
+	'staging13.linstantcle.ch' === lme_brands_resolve_url_rewrite_target( $config, 'reservation.sexcaperoom.ch', 'staging13.linstantcle.ch' ),
+	"non-régression : sous le levier de préproduction, la cible est l'hôte réel de la préproduction, jamais l'hôte de production déclaré au registre"
+);
+lme_brands_test_assert(
+	'staging13.linstantcle.ch' !== null && 'reservation.sexcaperoom.ch'
+		!== lme_brands_resolve_url_rewrite_target( $config, 'reservation.sexcaperoom.ch', 'staging13.linstantcle.ch' ),
+	"non-régression : la cible n'est jamais l'hôte de production, même quand l'hôte effectif y correspond"
+);
+
+// Équivalence de production : hôte effectif et hôte réel coïncident
+// toujours en production (aucun levier n'y est actif), donc le
+// comportement est inchangé par rapport à l'ancien lookup dans le registre.
+lme_brands_test_assert(
+	'reservation.sexcaperoom.ch' === lme_brands_resolve_url_rewrite_target( $config, 'reservation.sexcaperoom.ch', 'reservation.sexcaperoom.ch' ),
+	'équivalence de production : un vrai visiteur Sexcape Room est ciblé vers son propre hôte, comme avant ce correctif'
+);
+lme_brands_test_assert(
+	'linstantcle.ch' === lme_brands_resolve_url_rewrite_target( $config, 'linstantcle.ch', 'linstantcle.ch' ),
+	'équivalence de production : un vrai visiteur L\'Instant Clé est ciblé vers son propre hôte (no-op par construction, constat-deploiement-moteur.md §8 point 1)'
+);
+
+lme_brands_test_assert(
+	null === lme_brands_resolve_url_rewrite_target( $config, null, 'staging13.linstantcle.ch' ),
+	"resolve_url_rewrite_target : aucun hôte effectif (contexte exclu) donne aucune cible"
+);
+lme_brands_test_assert(
+	null === lme_brands_resolve_url_rewrite_target( $config, 'staging13.linstantcle.ch', 'staging13.linstantcle.ch' ),
+	"resolve_url_rewrite_target : un hôte effectif qui ne correspond à aucune marque du registre donne aucune cible"
+);
+lme_brands_test_assert(
+	null === lme_brands_resolve_url_rewrite_target( $config, 'linstantcle.ch', null ),
+	"resolve_url_rewrite_target : une marque résolue mais aucun hôte réel lisible donne aucune cible, jamais une cible devinée"
+);
+lme_brands_test_assert(
+	null === lme_brands_resolve_url_rewrite_target( $config, 'linstantcle.ch', '' ),
+	'resolve_url_rewrite_target : un hôte réel vide donne aucune cible'
+);
+
 // --- lme_brands_rate_limit_gate ------------------------------------------------
 
 $state = array();

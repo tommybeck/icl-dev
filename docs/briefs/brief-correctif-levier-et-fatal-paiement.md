@@ -1,6 +1,6 @@
 # Brief — deux correctifs après la recette du 21 septembre
 
-Version 1, 21 septembre 2026. Rédaction Cowork, exécution Code. **À déplacer dans `icl-dev/docs/briefs/`, pas à recopier.**
+Version 1.1, 22 septembre 2026. Rédaction Cowork, exécution Code. **À déplacer dans `icl-dev/docs/briefs/`, pas à recopier.**
 
 Suite de la recette menée par Thomas sur la préproduction `staging13` après le déploiement de B9. Trois observations remontées, deux constats à en tirer, et un seul vrai défaut.
 
@@ -72,7 +72,21 @@ C'est une erreur fatale PHP, et elle survient **après** la création de la comm
 
 ---
 
-## 4. Ce que ce brief ne demande pas
+## 4. Prompt de lancement
+
+À coller dans Claude Code depuis `~/Documents/icl-dev`. **Sonnet 5, effort moyen.**
+
+> Lis `CLAUDE.md`, puis `docs/briefs/brief-correctif-levier-et-fatal-paiement.md` en entier, puis `docs/briefs/constat-deploiement-moteur.md` §8 et `docs/briefs/constat-script-deploiement.md`. Deux sujets, dans cet ordre, et le second est le plus important.
+>
+> **Un, l'erreur fatale.** Le 21 septembre vers 14 h 38, une réservation de test du Boudoir du Désir sur la préproduction `staging13` affiche le récapitulatif de paiement en entier puis « Une erreur grave s'est produite sur ce site ». Établis la trace dans `wp-content/debug.log` de la préproduction, avec sa pile complète, et le fichier et la ligne fautifs. `includes/payment-brand.php` est le premier suspect, accroché à `payment_before_begin_transaction_vikbooking`. **Réponds explicitement à la question qui décide de la portée : cette erreur frapperait-elle aussi la production, où l'hôte résout naturellement, ou tient-elle à un état que seul le levier produit ?** Ne conclus pas sans l'établir. Dis aussi ce que l'échec a laissé derrière : commande en `standby`, session Stripe créée en clés de test, chambre verrouillée, et comment libérer par le contrôleur de Vik, jamais par SQL.
+>
+> **Deux, la réécriture d'URL en préproduction.** Relevé dans le DOM de `https://staging13.linstantcle.ch/fr/` le 21 septembre : les feuilles de style et les polices sont chargées depuis `https://reservation.sexcaperoom.ch/`, alors que `sexcaperoom-tunnel.css` répond en 200 sur `staging13` lui-même. Le levier force l'hôte de résolution, et `includes/url-rewrite.php` réécrit ensuite vers le `host` déclaré au registre, qui est celui de la production. Deux pistes au chapitre 2 de ce brief, découpler ou poser un hôte de substitution par environnement : **tranche sur preuves, sans préférence imposée**, et dis pourquoi l'autre ne tient pas. Ajoute les tests unitaires correspondants.
+>
+> **Lecture seule sur le serveur, rien de déployé, aucune clé lue.** Écris `docs/briefs/constat-fatal-page-paiement.md` pour le premier sujet et porte le correctif du second dans le code, avec son constat. Commit et poussée après revue.
+
+---
+
+## 5. Ce que ce brief ne demande pas
 
 Ni de relancer la recette, ni de toucher à la production, ni de corriger la vérification n°4 dans le plan de marche : Cowork s'en charge. Et **rien sur le montant de 253 CHF** : c'est le tarif standard, pas la remise à trois décimales de la 1818, et il n'y a pas de rapport à chercher là.
 
@@ -83,3 +97,4 @@ Ni de relancer la recette, ni de toucher à la production, ni de corriger la vé
 | Version | Date | Modification |
 |---|---|---|
 | 1.0 | 2026-09-21 | Création, après la recette de Thomas sur `staging13`. Deux observations expliquées par le levier, un défaut de réécriture d'URL en préproduction, une erreur fatale à établir. |
+| 1.1 | 2026-09-22 | Ajout du prompt de lancement, qui manquait. |

@@ -82,7 +82,13 @@ function lme_brands_resolve_brand_by_host_cached( $host ) {
  * Hôte HTTP de la requête courante, normalisé (minuscule, sans port), ou
  * null si absent. Point de normalisation partagé par la réécriture d'URL
  * (includes/url-rewrite.php), le filtrage de présentation et la garde de
- * réservation (phase 2) : trois lecteurs, une seule façon de lire l'hôte.
+ * réservation (phase 2) : trois lecteurs, une seule façon de décider QUELLE
+ * marque gouverne la requête (éventuellement forcée par le levier).
+ *
+ * Correctif du 22 septembre 2026 : cette fonction ne sert plus de cible à
+ * la réécriture d'URL, seulement de déclencheur. Voir
+ * lme_brands_current_raw_http_host() ci-dessous et
+ * lme_brands_resolve_url_rewrite_target() (includes/core.php).
  *
  * Chantier B8 : sur `staging10.linstantcle.ch`, cet hôte ne correspond à
  * aucune marque du registre, et c'est voulu (chapitre 4.2 du brief : « on ne
@@ -113,12 +119,9 @@ function lme_brands_current_http_host() {
 	}
 	$resolved = true;
 
-	$request_host = null;
-
-	if ( ! empty( $_SERVER['HTTP_HOST'] ) ) {
-		$request_host = strtolower( (string) wp_unslash( $_SERVER['HTTP_HOST'] ) );
-		$request_host = preg_replace( '/:\d+$/', '', $request_host );
-	}
+	$request_host = lme_brands_normalize_http_host(
+		isset( $_SERVER['HTTP_HOST'] ) ? (string) wp_unslash( $_SERVER['HTTP_HOST'] ) : null
+	);
 
 	$override = defined( 'LME_BRANDS_HOST_OVERRIDE' ) ? LME_BRANDS_HOST_OVERRIDE : null;
 	$outcome  = lme_brands_resolve_effective_http_host( $request_host, wp_get_environment_type(), $override );
@@ -140,6 +143,41 @@ function lme_brands_current_http_host() {
 	}
 
 	$host = $outcome['host'];
+
+	return $host;
+}
+
+/**
+ * Hôte HTTP réel de la requête courante, normalisé comme
+ * lme_brands_current_http_host() mais **jamais** soumis au levier de
+ * préproduction B8 : c'est l'hôte qui sert effectivement la requête.
+ *
+ * Ajouté le 22 septembre 2026 (docs/briefs/brief-correctif-levier-et-fatal-paiement.md
+ * chapitre 2) pour includes/url-rewrite.php, seul appelant : la cible d'une
+ * réécriture d'URL doit toujours être cet hôte réel, jamais l'hôte
+ * potentiellement forcé de lme_brands_current_http_host() ni un `host`
+ * lu dans le registre — voir lme_brands_resolve_url_rewrite_target()
+ * (includes/core.php) pour la décision elle-même, et le constat pour la
+ * preuve que confondre les deux hôtes a fait charger les feuilles de style
+ * de la préproduction depuis la production.
+ *
+ * Résolu une seule fois par requête, comme les autres lecteurs d'hôte de ce
+ * fichier.
+ *
+ * @return string|null
+ */
+function lme_brands_current_raw_http_host() {
+	static $resolved = false;
+	static $host     = null;
+
+	if ( $resolved ) {
+		return $host;
+	}
+	$resolved = true;
+
+	$host = lme_brands_normalize_http_host(
+		isset( $_SERVER['HTTP_HOST'] ) ? (string) wp_unslash( $_SERVER['HTTP_HOST'] ) : null
+	);
 
 	return $host;
 }

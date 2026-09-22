@@ -40,9 +40,21 @@ function lme_brands_should_rewrite_host() {
 }
 
 /**
- * Hôte de marque à utiliser pour la requête courante, ou null si aucune
+ * Hôte cible de la réécriture pour la requête courante, ou null si aucune
  * réécriture ne s'applique (contexte exclu, ou hôte qui ne correspond à
  * aucune marque du registre). Résolu une seule fois par requête.
+ *
+ * Correctif du 22 septembre 2026 (brief-correctif-levier-et-fatal-paiement.md
+ * chapitre 2) : la cible n'est plus lue dans le registre
+ * ($config['brands'][$brand_key]['host']), qui vaut l'hôte de *production*
+ * de la marque même sous le levier de préproduction B8 — c'était la cause
+ * du défaut. La décision (et pourquoi c'est toujours l'hôte réel de la
+ * requête qu'il faut viser) vit dans lme_brands_resolve_url_rewrite_target()
+ * (includes/core.php), fonction pure, testable sans WordPress.
+ * lme_brands_current_http_host() reste le lecteur qui décide QUELLE marque
+ * gouverne la requête (éventuellement via le levier) ;
+ * lme_brands_current_raw_http_host() fournit l'hôte réel, jamais forcé, qui
+ * sert de cible.
  *
  * @return string|null
  */
@@ -59,23 +71,11 @@ function lme_brands_current_request_brand_host() {
 		return null;
 	}
 
-	$request_host = lme_brands_current_http_host();
-
-	if ( null === $request_host ) {
-		return null;
-	}
-
-	$config    = lme_brands_get_config();
-	$brand_key = lme_brands_resolve_brand_by_host( $config, $request_host );
-
-	if ( null === $brand_key ) {
-		// Hôte qui n'est celui d'aucune marque enregistrée (ex. staging,
-		// accès direct par IP) : on ne devine rien, WordPress garde son
-		// comportement par défaut.
-		return null;
-	}
-
-	$host = $config['brands'][ $brand_key ]['host'];
+	$host = lme_brands_resolve_url_rewrite_target(
+		lme_brands_get_config(),
+		lme_brands_current_http_host(),
+		lme_brands_current_raw_http_host()
+	);
 
 	return $host;
 }
