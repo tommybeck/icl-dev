@@ -1,6 +1,6 @@
 # Statut — chantier réservation Sexcape Room et site sexcaperoom.ch
 
-**Version : 3.7 — 2026-09-22**
+**Version : 3.8 — 2026-09-22**
 
 Document de synthèse pour ce projet Communication. Il ne remplace aucun fichier existant, il les relie : le chantier réservation vit dans le dépôt `icl-dev` (Claude Code), la construction du site sexcaperoom.ch vit ici (Cowork, EMCP Tools), et les deux se rejoignent à un seul endroit précis, décrit plus bas.
 
@@ -37,6 +37,12 @@ Les onze fichiers de doctrine de ce projet datent tous du 4 septembre. Deux chan
 **Le script a rendu un échec sur un succès, et c'est le seul défaut de cette passe.** Sa vérification d'apparence appelle `https://staging13.linstantcle.ch/` sans suivre la redirection 301 que TranslatePress pose vers `/fr/`, lit un corps vide, et conclut à l'absence des jetons. Correctif et prompt dans `brief-correctif-verification-apparence.md`, avec l'exclusion `tests/` dans la même passe. **La leçon dépasse le correctif** : c'est le symétrique de la règle « aucun échec silencieux », un succès bruyamment nié, et toute vérification du script qui conclut d'une absence est à relire de la même façon.
 
 **B9b livré et revu le 22 septembre**, commit `cb46ba8`, deux constats. **Le correctif d'URL est porté et il est bon** : la réécriture vise désormais l'hôte réel de la requête, la marque résolue ne servant plus qu'à décider s'il faut réécrire. En production le geste devient un no-op, en préproduction il garde les liens sur la préproduction.
+
+**B9c livré et revu le 22 septembre**, commit `f7a740a`. La signature est corrigée, la prémisse l'est **à sa source** dans `constat-phase-0.md` §Q5, le paragraphe fautif conservé et désigné comme faux plutôt que remplacé en silence, et trois tests échouent désormais sur le code du 17 septembre. `lme_brands_correct_payment_urls()` vise l'hôte réel, comme `url-rewrite.php`. **La phase 4 est corrigée mais n'est pas recettée** : elle n'a jamais tourné une seule fois, et la vérification n°6 sera la première à la mettre à l'épreuve.
+
+**Une erreur de ma part, relevée par Code et corrigée.** J'ai écrit que les 120 tests validaient la forme fausse. **C'est faux** : ils ne couvraient pas du tout cette fonction. Affirmation posée sans vérification, c'est-à-dire la faute même que je décrivais.
+
+**La leçon réelle est plus large, et elle ouvre B9d.** Une fonction accrochée à un crochet tiers a été livrée et revue sans un seul test. Surtout : la forme des arguments de chaque rappel repose sur une lecture du code de Vik seul, alors que c'est WordPress qui les livre et qu'il les transforme. B9d dresse la liste des crochets et met la forme reçue en regard de la forme déclarée, avant B10. Un rappel qui se trompe de forme ne dégrade pas, il lève une erreur fatale : sur la garde de réservation, cela casserait toute création de réservation des deux marques.
 
 **La fatale est établie, et c'est beaucoup plus grave que prévu.** `payment-brand.php:73` lit `$args[0]` alors que le rappel reçoit l'objet de paiement directement. **Le paiement de toute réservation est cassé, les deux marques, les deux environnements, pour n'importe quelle passerelle**, dès que le mu-plugin est actif. Rien à voir avec le levier : le plantage précède toute résolution de marque. **La phase 4 n'a donc jamais fonctionné**, et elle avait été revue et donnée pour faite le 17 septembre. Aucun client n'est touché, rien n'étant déployé en production, et c'est un verrou dur sur B10.
 
@@ -245,6 +251,6 @@ Les conversations de ce chantier sont longues et coûteuses. **Elles se coupent 
 | 3.3 | 2026-09-20 | B8 revu et validé. Plan en 2.3 : B9 et D5 ajoutés, B6 relevé en Opus 5 élevé et découplé de la lecture Stripe. Revue de B5 toujours ouverte, et c'est le dernier verrou avant B6. |
 | 3.4 | 2026-09-20 | Déploiement par script, tâche B9 ; l'ancien B9 devient B10. Recréation de `staging10` depuis la production avant tout, et les trois gestes qui ne survivent pas à la copie. Plan en 2.4. |
 | 3.5 | 2026-09-21 | B9 revu et validé, une réserve sur `tests/` avant la production. Parade de paiement tranchée, C, D et E avec le critère de K ; G écartée et remplacée. Préproduction recréée sous `staging13`. Plan en 2.5. |
-| 3.6 | 2026-09-21 | Première recette. Recette en deux passes, une par marque. Deux correctifs en B9b : la réécriture d'URL de la préproduction pointe vers la production, et une erreur fatale coupe la page de paiement. Plan en 2.7. |
+| 3.6 | 2026-09-21 | **Premier déploiement réel** : le moteur tourne en préproduction, établi par lecture directe, recette n°1 acquise et n°4 à moitié. Un défaut du script, qui ne suit pas la redirection de TranslatePress et nie un succès. Première recette : elle se mène en deux passes, une par marque. Deux correctifs en B9b, la réécriture d'URL et l'erreur fatale de la page de paiement. Plan en 2.7. |
 | 3.7 | 2026-09-22 | B9b revu. Correctif d'URL bon et porté. La fatale est établie : la phase 4 casse le paiement des deux marques sur les deux environnements, par une prémisse fausse du constat de phase 0 que les tests validaient. Ajout de B9c. Plan en 2.8. |
-| 3.6 | 2026-09-21 | **Le moteur tourne en préproduction**, premier déploiement réel, établi par lecture directe. Recette n°1 acquise, n°4 à moitié. Un défaut du script de déploiement, qui ne suit pas la redirection de TranslatePress et nie un succès ; correctif dans `brief-correctif-verification-apparence.md`. |
+| 3.8 | 2026-09-22 | B9c revu et validé : la phase 4 est corrigée et reste à recetter. Correction d'une affirmation fausse de ma part sur les tests, qui ne couvraient pas la fonction fautive. Ajout de B9d, les signatures de crochets, avant B10. Doublon de numéro 3.6 du journal résorbé. Plan en 2.9. |
