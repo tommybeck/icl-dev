@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.4, 20 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.4 remplace le déploiement à la main par un script, et pose le rafraîchissement de la préproduction avant tout.
+**Version 2.7, 21 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.7 pose la recette en deux passes, une par marque, et acte les deux correctifs remontés par la première recette.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -79,11 +79,12 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B4 | Paiement, retour, page de confirmation | Sonnet 5, moyen | **fait** le 17 septembre, commit `6a82070`, revue faite. Critère de recette n°8 laissé ouvert, décision de Thomas |
 | B4b | Examiner la nouvelle version de VikStripe avant d'écrire à E4J | Opus 5, élevé | **fait** le 18 septembre, commit `6fe7ef0`. C'est la même 2.2.4, le défaut est intact, aucun webhook. Revue du 19 : conclusion tenue, mais « elle n'a jamais tourné » n'est pas démontré |
 | B5 | Marquer les rappels avant séjour, par `vikbooking_before_send_mail` | Opus 5, élevé | **livrée** le 17 septembre, commit `c22f5b7`, `constat-b5-rappels.md`, rien de déployé. **Revue Cowork non faite, et elle passe avant B6** |
-| B6 | Parade de la réserve de paiement | **Opus 5, élevé** | ouvert, attend **la seule décision de la parade**, pas la lecture Stripe |
+| B6 | Parade de la réserve de paiement | **Opus 5, élevé** | **lançable** : la parade est tranchée le 21 septembre, voir ci-dessous. Passe après la revue de B5 |
 | B7 | Identité d'envoi des repas et des bons cadeaux | Sonnet 5, moyen | ouvert, attend une décision de Thomas |
 | B8 | Levier de préproduction et inventaire de déploiement | Sonnet 5, moyen | **fait** le 20 septembre, commit `fade08b`, `constat-deploiement-moteur.md`, revue faite. 120 tests au vert |
-| B9 | Script de déploiement, de vérification et de retour arrière | Sonnet 5, moyen | **nouveau, et c'est le prochain** |
-| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert, voir ci-dessous |
+| B9 | Script de déploiement, de vérification et de retour arrière | Sonnet 5, moyen | **fait** le 21 septembre, commits `289339e` et `125e65b`, `constat-script-deploiement.md`, revue faite. Une réserve avant la production, ci-dessous |
+| B9b | Deux correctifs après la première recette : la réécriture d'URL en préproduction, et l'erreur fatale de la page de paiement | Sonnet 5, moyen | **nouveau, et bloquant pour la recette**, `brief-correctif-levier-et-fatal-paiement.md` |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis : l'exclusion `tests/` du script**, voir ci-dessous |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
@@ -115,18 +116,54 @@ Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette r
 
 **Adresse destinataire des essais : une adresse jetable suffit, et c'est décidé.** La recette vérifie les en-têtes et l'identité d'envoi, pas le contenu. D4 ne bloque donc pas la recette.
 
-**La recette, dans l'ordre.**
+### La recette du moteur — les huit vérifications
+
+À mener après un déploiement réussi en préproduction. C'est ce que les autres chapitres appellent « la recette ».
+
+**En deux passes, une par marque, et c'est obligatoire.** Le levier ne porte qu'une marque à la fois : tant que `LME_BRANDS_HOST_OVERRIDE` vaut `reservation.sexcaperoom.ch`, **la préproduction entière est Sexcape Room**. Basculer la constante sur `linstantcle.ch`, avec `--forcer-override`, pour la seconde passe. La vérification n°4 n'est pas vérifiable autrement, et c'est ce qui a égaré la première recette du 21 septembre.
 
 | # | Ce qu'on vérifie | Où |
 |---|---|---|
 | 1 | L'hôte résout la bonne marque, et un hôte inconnu n'en résout aucune | préproduction |
 | 2 | Les chambres des autres marques ne sont servies par aucune des quatre vues publiques | préproduction |
 | 3 | La garde refuse une chambre hors marque et une chambre désactivée | préproduction |
-| 4 | L'apparence Sexcape Room s'applique, et linstantcle.ch reste intact | préproduction puis production |
+| 4 | L'apparence Sexcape Room s'applique en passe Sexcape Room, et aucun jeton `--srlm-*` n'apparaît en passe L'Instant Clé | préproduction, deux passes, puis production |
 | 5 | Les en-têtes d'une confirmation portent l'expéditeur de la marque, pour les deux marques | préproduction, puis une vraie confirmation en production |
 | 6 | La session Stripe porte la métadonnée de marque, l'URL de retour pointe l'hôte appelant, la page de confirmation s'affiche | préproduction, clés de test |
 | 7 | Le rappel avant séjour part sous la bonne identité | préproduction, après la revue de B5 |
 | 8 | Hors liste blanche, l'hôte redirige vers `sexcaperoom.ch` en 302 | préproduction puis production |
+
+### Ce que la première recette a trouvé — 21 septembre
+
+**Deux observations n'en sont pas.** Sur `staging13`, seules les trois expériences Sexcape Room sont servies et L'Aparté est refusée : c'est le levier qui fait son travail, la préproduction entière étant Sexcape Room tant que la constante vaut l'hôte de réservation. D'où la recette en deux passes ci-dessus.
+
+**Un défaut réel du levier.** Le levier force l'hôte de résolution, et `url-rewrite.php` réécrit ensuite les URL vers le `host` **déclaré au registre**, qui est celui de la production. Relevé dans le DOM de `staging13` le 21 septembre : les feuilles de style et les polices sont chargées depuis `https://reservation.sexcaperoom.ch/`, alors que `sexcaperoom-tunnel.css` répond bien en 200 sur `staging13` lui-même. La préproduction mélange donc deux hôtes, ce qui explique le calendrier à moitié habillé qu'a vu Thomas, **et rend la vérification n°4 sans valeur tant que ce n'est pas corrigé.** Nul en production, où le `host` déclaré est le bon.
+
+**Une erreur fatale.** Réservation de test du Boudoir, une nuit, 253 CHF : le récapitulatif s'affiche, puis « Une erreur grave s'est produite sur ce site ». Après création de la commande, pendant le rendu de la page de paiement. `payment-brand.php` est le premier suspect, et la question décisive est de savoir si la cause tient au levier ou si elle frapperait aussi la production.
+
+Les deux vont à **B9b**, brief `brief-correctif-levier-et-fatal-paiement.md`.
+
+### Réserve sur B9, à lever avant la production, pas avant la préproduction
+
+Le script tire sa liste de `git ls-files`, jamais d'une énumération figée : c'est la bonne décision, et elle respecte la leçon du 15 septembre, un fichier présent n'est pas un fichier suivi. Elle a une conséquence que le constat ne relève pas : **`mu-plugins/lme-brands/tests/test-core.php` est suivi par Git, donc il part sur le serveur.**
+
+WordPress ne le charge pas, les mu-plugins n'étant chargés qu'à la racine de `mu-plugins/`. Mais le fichier reste **exécutable par une simple requête HTTP** sur `wp-content/mu-plugins/lme-brands/tests/test-core.php`, et il ne porte aucune garde `ABSPATH`, volontairement, puisqu'il doit tourner hors de WordPress. Il n'expose ni secret ni écriture, seulement des fonctions pures et, en cas d'échec, des chemins de fichiers.
+
+**Correctif : exclure le motif `tests/` sous les racines déployées.** C'est un motif et non une énumération, donc il ne grossit pas avec le temps, et l'argument de B9 contre les listes figées ne s'y applique pas. Sans urgence pour la préproduction, **obligatoire avant B10**.
+
+### La parade de paiement est tranchée — décision du 21 septembre
+
+**Retenues : C, D et E de `constat-reserve-paiement.md` §8**, dans un seul mu-plugin.
+
+- **C, webhook `checkout.session.completed`**, chemin principal, de serveur à serveur, qui rejoue `notifypayment` par son `sid` et son `ts`.
+- **D, réconciliation planifiée**, en filet, qui rattrape aussi l'existant. **Avec un correctif de critère** : elle retient la session par `metadata.booking_id`, **jamais** par l'option `stripe_order_<id>`. C'est la parade K de `constat-incident-1818.md` §5, et sans ce correctif D aurait échoué exactement comme `notifypayment` sur la 1818.
+- **E, alerte**, pour qu'aucun rattrapage ni aucun échec ne passe en silence.
+
+**A et B ne sont pas des parades, ce sont des mesures.** Le §8 les range dans la même liste, ce qui prête à confusion : A chiffre le dégât passé, elle ne conditionne pas le choix de la parade. La lecture Stripe reste à faire, pour elle-même.
+
+**F tombe largement** avec la sortie de NitroPack, et le reste est couvert par C et D.
+
+**G est écartée, et remplacée.** Allonger `minuteslock` aggrave le cas le plus fréquent : le verrou n'est pas conscient du client, donc la session abandonnée sur un téléphone bloque la nuit contre la personne elle-même passée sur son ordinateur, et Thomas a déjà reçu l'appel. Le constat en porte la trace chiffrée : **53 des 137 commandes en attente ont vu la page de paiement présentée au moins deux fois.** À la place, **traiter le relâchement plutôt que la durée** : le balayage de D annule la commande et libère la chambre quand la session Stripe est expirée, ou ouverte et non payée au-delà d'un délai. Même passe, critère inverse de celui du rattrapage. **Cette libération est une écriture sur les données de Vik : elle passe par le contrôleur de Vik, jamais par SQL**, le compte MySQL restant en lecture seule. `constat-reserve-paiement.md` §8 est à corriger sur ce point, tâche de Code au lancement de B6.
 
 **Le piège qui a coûté le plus cher sur ce chantier**, à savoir avant toute recette d'e-mail : `from_email_force` et `from_name_force` de WP Mail SMTP écrasent en silence l'expéditeur composé par le code. Désactivés sur linstantcle.ch le 15 septembre.
 
@@ -220,7 +257,7 @@ Ouvert par B4b. Le défaut de `stripe.php:365` est celui de E4J et non un artefa
 ```
 fait ── A1 A2 A3 A4 ── B1 B2 B3 B4a B4 B4b B5 ── C1 C2 C3 C4 ── D1 D2 ── G1 ── NitroPack
 
-maintenant ─┬─ staging neuf ─ B9 ─ déploiement ─ recette ─ B10 ─ D3 ─┐ le chemin du test
+maintenant ─┬─ déploiement staging ─ recette ─ exclusion tests/ ─ B10 ─ D3 ─┐ le test
             ├─ G2 ──── G3 ─────────────────┤   Code puis Thomas
             ├─ revue B5 ───────────────────┤   Cowork
             ├─ F1, F2, F3 ─────────────────┤   Thomas, urgent, hors chemin critique
@@ -231,7 +268,7 @@ maintenant ─┬─ staging neuf ─ B9 ─ déploiement ─ recette ─ B10 �
             └─ C5, observation DMARC ──────┴─ E3, E5 ── phase 6, bascule
 ```
 
-**Ce qui doit être vrai avant la bascule :** la recette de B8 passée, B5 revu et déployé, G2 et G3 en place, D3 validé, D4 livré, E2 et E6 en service, et la réserve de paiement tranchée.
+**Ce qui doit être vrai avant la bascule :** les huit vérifications de la recette passées, B5 revu et déployé, G2 et G3 en place, D3 validé, D4 livré, E2 et E6 en service, et la réserve de paiement tranchée.
 
 **Ce qui n'est sur le chemin critique de rien, et doit passer en premier quand même :** le chantier F et la lecture Stripe. Le premier touche des clients qui paient aujourd'hui, la seconde porte sur de l'argent déjà encaissé. C'est précisément parce qu'ils ne bloquent rien qu'ils risquent d'attendre indéfiniment.
 
@@ -241,20 +278,21 @@ maintenant ─┬─ staging neuf ─ B9 ─ déploiement ─ recette ─ B10 �
 
 **Faits le 19 septembre**, retirés de cette liste : la sortie de la page 845 et des URL à `sid` de NitroPack, et G1.
 
-1. **Recréer `staging13` depuis la production.** La préproduction a dérivé depuis sa création, mises à jour et réglages compris, et rien de ce chantier n'y est déployé : **c'est le moment le moins cher pour la refaire**, et une recette menée sur une copie périmée ne prouve rien de la production. À faire **avant** le déploiement.
+1. **Recréer la préproduction depuis la production. Fait le 20 septembre**, sous `staging13`. À refaire dès qu'elle aura dérivé : une recette menée sur une copie périmée ne prouve rien de la production.
 2. **Après chaque recréation**, trois gestes qui ne survivent pas à la copie, dans cet ordre : vérifier que `WP_ENVIRONMENT_TYPE` vaut bien `staging` ; **basculer VikStripe sur les clés de test**, la copie ramenant les clés de production avec la base ; reposer la ligne `LME_BRANDS_HOST_OVERRIDE` du chapitre 5 du constat.
-3. **Lancer le script de B9**, d'abord en simulation, puis pour de vrai. Il remplace les copies et les vérifications à la main du constat de déploiement.
-4. **Choisir la parade de paiement**, ce qui débloque B6. Cette décision **n'attend pas la lecture Stripe** : la lecture mesure le dégât passé, la parade arrête le dégât futur. Parades au §8 de `constat-reserve-paiement.md` et au §5 de `constat-incident-1818.md`. Recommandation de Cowork : webhook `checkout.session.completed` en chemin principal, réconciliation planifiée par `metadata.booking_id` en filet, courriel de refus enrichi. Cela suppose que tu poses toi-même dans `wp-config.php` une clé Stripe restreinte en lecture et le secret de signature du webhook.
-5. **Interroger Stripe sur les 137 sessions non soldées**, et relever leur `payment_status`. Lecture seule, aucun effet de bord. C'est la seule façon de savoir si un client a été débité sans réservation. Clé secrète Stripe, donc personne d'autre. Parades classées au §8 de `constat-reserve-paiement.md`, à décider ensuite.
-6. **F1**, une minute.
-7. **F3**, avant le 24 septembre, après avoir tranché l'arbitrage des groupements.
-8. **F2**.
-9. **Lire l'historique des restaurations de Site Tools pour le 15 septembre 2026** : heure et portée, fichiers ou bases. C'est ce qui tranche entre les deux lectures du §4 de `revue-constat-vikstripe-b4b.md`, et cela décide si le souvenir d'un dysfonctionnement du greffon était juste. Lecture seule, quelques clics.
-10. **Dire d'où vient l'archive de `.local/wp-vikstripe-new`** : le téléversement du 15 septembre, ou une reprise chez vikwp.com le 18. Le constat le suppose sans l'établir.
-11. **Relire et corriger les lignes de `journal-vik.md`** que Cowork et Code y portent désormais, et fournir les deux valeurs qu'eux seuls ne peuvent pas trouver : la portée et l'heure de la restauration du 15 septembre, et le motif de l'écriture du 11 décembre 2025 sur `stripe.php` s'il s'en souvient.
-12. **Charger la clé SSH dans l'agent** à chaque redémarrage du Mac, `ssh-add --apple-use-keychain ~/.ssh/icl_ed25519`, et **le porter dans `handoff-acces-mysql.md`**, qui décrit la clé sans mentionner qu'elle porte une phrase de passe. Sans l'agent, les journaux et la base sont hors d'atteinte, et B4b l'a appris à ses dépens.
-13. **Trancher** : le périmètre de A6, l'identité d'envoi des repas et des bons cadeaux, la parade de paiement, et **le critère de recette n°8 de la phase 4**, le libellé de relevé bancaire. Le point d'accroche des rappels sort de cette liste : il est tranché et posé par B5. Ce dernier n'est pas qu'une question comptable : c'est ce que le client lit sur son relevé de carte, donc une question de discrétion pour une expérience Sexcape Room.
-14. **Déployer B3** quand la recette d'en-têtes est concluante.
+3. **Lancer `deployer-moteur.sh` sur la préproduction**, d'abord sans `--appliquer` pour lire ce qu'il changerait, puis avec.
+4. **Mener la recette**, les huit vérifications du chantier B.
+5. **Poser dans `wp-config.php` la clé Stripe restreinte en lecture et le secret de signature du webhook**, avant le déploiement de B6. La parade est tranchée depuis le 21 septembre, voir le chantier B ; ces deux valeurs sont la seule chose qu'elle attend de toi.
+6. **Interroger Stripe sur les 137 sessions non soldées**, et relever leur `payment_status`. Lecture seule, aucun effet de bord. C'est la seule façon de savoir si un client a été débité sans réservation. Clé secrète Stripe, donc personne d'autre. Parades classées au §8 de `constat-reserve-paiement.md`, à décider ensuite.
+7. **F1**, une minute.
+8. **F3**, avant le 24 septembre, après avoir tranché l'arbitrage des groupements.
+9. **F2**.
+10. **Lire l'historique des restaurations de Site Tools pour le 15 septembre 2026** : heure et portée, fichiers ou bases. C'est ce qui tranche entre les deux lectures du §4 de `revue-constat-vikstripe-b4b.md`, et cela décide si le souvenir d'un dysfonctionnement du greffon était juste. Lecture seule, quelques clics.
+11. **Dire d'où vient l'archive de `.local/wp-vikstripe-new`** : le téléversement du 15 septembre, ou une reprise chez vikwp.com le 18. Le constat le suppose sans l'établir.
+12. **Relire et corriger les lignes de `journal-vik.md`** que Cowork et Code y portent désormais, et fournir les deux valeurs qu'eux seuls ne peuvent pas trouver : la portée et l'heure de la restauration du 15 septembre, et le motif de l'écriture du 11 décembre 2025 sur `stripe.php` s'il s'en souvient.
+13. **Charger la clé SSH dans l'agent** à chaque redémarrage du Mac, `ssh-add --apple-use-keychain ~/.ssh/icl_ed25519`, et **le porter dans `handoff-acces-mysql.md`**, qui décrit la clé sans mentionner qu'elle porte une phrase de passe. Sans l'agent, les journaux et la base sont hors d'atteinte, et B4b l'a appris à ses dépens.
+14. **Trancher** : le périmètre de A6, l'identité d'envoi des repas et des bons cadeaux, et **le critère de recette n°8 de la phase 4**, le libellé de relevé bancaire. Le point d'accroche des rappels sort de cette liste : il est tranché et posé par B5. Ce dernier n'est pas qu'une question comptable : c'est ce que le client lit sur son relevé de carte, donc une question de discrétion pour une expérience Sexcape Room.
+15. **Déployer B3** quand la recette d'en-têtes est concluante.
 
 ---
 
@@ -264,7 +302,7 @@ maintenant ─┬─ staging neuf ─ B9 ─ déploiement ─ recette ─ B10 �
 
 ### B9 — script de déploiement, de vérification et de retour arrière. Sonnet 5, effort moyen
 
-> Lis `CLAUDE.md`, `docs/briefs/constat-deploiement-moteur.md` en entier et `docs/briefs/plan-de-marche.md` §B9. Le constat décrit un déploiement à la main, à faire deux fois, en préproduction puis en production. Rends-le exécutable : **un seul script, lancé sur les deux environnements**, pour que la symétrie soit une propriété du geste et non une intention.
+> Lis `CLAUDE.md`, `docs/briefs/constat-deploiement-moteur.md` en entier et le chantier B de `docs/briefs/plan-de-marche.md`. Le constat décrit un déploiement à la main, à faire deux fois, en préproduction puis en production. Rends-le exécutable : **un seul script, lancé sur les deux environnements**, pour que la symétrie soit une propriété du geste et non une intention.
 >
 > **Il simule par défaut** : sans option explicite, il imprime ce qu'il changerait et n'écrit rien. Il **refuse de continuer** plutôt que de deviner, sur au moins ces préalables : `wp_get_environment_type()` conforme à l'environnement visé, empreintes attendues de ce qui est déjà en place, et en préproduction VikStripe en clés de test, vérifié **par le seul préfixe** `sk_test_` contre `sk_live_`, jamais par la valeur, et sans journaliser ce préfixe ailleurs que sur la sortie standard.
 >
@@ -281,6 +319,8 @@ maintenant ─┬─ staging neuf ─ B9 ─ déploiement ─ recette ─ B10 �
 > **À ne lancer qu'une fois la parade choisie par Thomas.** Lis `CLAUDE.md`, `docs/briefs/constat-reserve-paiement.md` en entier dont le §8, `docs/briefs/constat-incident-1818.md` §5, et `docs/briefs/constat-deploiement-moteur.md` §8. Implémente la parade retenue, dans un mu-plugin, **jamais dans le greffon**.
 >
 > Si c'est un webhook, il rejoue `notifypayment` par son `sid` et son `ts` plutôt que d'en dupliquer les dix-sept effets, le contrôleur étant idempotent ; il vérifie la signature Stripe, refuse tout appel non signé, et reste inerte si le secret de signature n'est pas défini. Si c'est une réconciliation planifiée, elle retient la session par `metadata.booking_id` et **jamais** par l'option `stripe_order_<id>`, qui est précisément ce qui a échoué sur la 1818, et elle rattrape aussi l'existant.
+>
+> **La parade est tranchée** : C, D et E du §8, avec le critère de K (`metadata.booking_id`, jamais `stripe_order_<id>`). Ajoute au balayage le relâchement du verrou : annuler la commande et libérer la chambre quand la session Stripe est expirée, ou ouverte et non payée au-delà d'un délai. **Cette libération est une écriture sur les données de Vik** : elle passe par le contrôleur de Vik, jamais par SQL. Corrige au passage le §8 du constat : A et B sont des mesures et non des parades, et G est écartée, allonger `minuteslock` aggravant le blocage d'un client par sa propre session abandonnée.
 >
 > **Le code s'exécutera pour les deux marques** : dis explicitement, dans ton constat, ce qu'il change au parcours de linstantcle.ch. Journalise et alerte chaque rattrapage : un paiement récupéré en silence est un incident qu'on n'apprend jamais. **Aucune clé n'est lue depuis le dépôt ni écrite nulle part** : elles vivent dans `wp-config.php`, posées par Thomas. Ne déploie rien.
 
@@ -332,6 +372,9 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.7 | 2026-09-21 | Première recette menée sur `staging13`. La recette passe en deux passes, une par marque, la vérification n°4 n'étant pas vérifiable autrement. Ajout de B9b : la réécriture d'URL de la préproduction pointe vers la production, et une erreur fatale coupe la page de paiement. |
+| 2.6 | 2026-09-21 | La recette du moteur gagne un titre de section : ses huit vérifications existaient depuis la 2.2 mais sans en-tête, dans le corps du chantier B, et les renvois parlaient d'un « chapitre B8 » qui n'a jamais existé. Renvois corrigés. |
+| 2.5 | 2026-09-21 | B9 livré, revu et acté, avec une réserve : `tests/test-core.php` est suivi par Git donc déployé, et exécutable par HTTP ; exclusion `tests/` obligatoire avant B10. La parade de paiement est tranchée, C, D et E avec le critère de K, ce qui débloque B6 ; G est écartée et remplacée par le relâchement du verrou. Chapitre 4 remis à jour. |
 | 2.4 | 2026-09-20 | Le déploiement passe par un script unique lancé sur les deux environnements, tâche B9 ; l'ancien B9 devient B10. Rafraîchissement de `staging13` depuis la production posé en tête du chapitre 4, avec les trois gestes qui ne survivent pas à la copie. |
 | 2.3 | 2026-09-20 | B8 livré, revu et acté, avec sa trouvaille : le thème du dépôt n'était pas une copie du serveur et aurait écrasé 7 390 octets de production. Ajout de B9, le déploiement en production comme décision distincte, et de D5, la correction du constat D2. B6 relevé en Opus 5 effort élevé et son prompt durci. Chapitre 4 : le déploiement en préproduction détaillé, et le choix de la parade ajouté, découplé de la lecture Stripe. |
 | 2.2 | 2026-09-20 | Ajout de B8, la recette du moteur, absente du plan depuis l'origine : le moteur est écrit et rien n'est déployé, constaté sur l'hôte de réservation. Ajout de G3. G1 et le geste NitroPack passés à « fait », retirés du chapitre 4, qui gagne les deux gestes de déploiement. E3 et E5 dépendent désormais de B8. `journal-vik.md` s'ouvre à Code. |

@@ -79,9 +79,25 @@ DEPLOY_ROOTS=("mu-plugins" "themes/astra-child")
 # -- donc cette exclusion ne grossira pas avec le temps.
 EXCLUDE_FILES=("themes/astra-child/functions.php" "themes/astra-child/style.css")
 
+# Exclusion par motif, en plus de l'exclusion nominative : tout chemin qui
+# traverse un dossier "tests" n'est jamais deploye, quel que soit le mu-plugin
+# ou le sous-dossier du theme qui le porte. C'est un motif et non une
+# enumeration -- il ne grossira pas avec le temps, meme si tests/ apparait
+# ailleurs plus tard -- exactement l'argument qui justifie deja la liste
+# dynamique ci-dessus. Motif trouve sur mu-plugins/lme-brands/tests/, suivi
+# par git donc deploye sans garde ABSPATH, prerequis de B10
+# (docs/briefs/brief-correctif-verification-apparence.md).
+is_test_path() {
+  case "$1" in
+    tests/*|*/tests/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 is_excluded() {
   local f
   for f in "${EXCLUDE_FILES[@]}"; do [ "$1" = "$f" ] && return 0; done
+  is_test_path "$1" && return 0
   return 1
 }
 
@@ -592,7 +608,10 @@ do_apply() {
   fi
   vert "  empreintes vérifiées, douze fichiers et plus, toutes conformes"
 
-  local log_offset; log_offset=$(remote_call debug-log-offset)
+  local log_offset log_offset_rc
+  log_offset=$(remote_call debug-log-offset); log_offset_rc=$?
+  [ "$log_offset_rc" -eq 0 ] && [ -n "$log_offset" ] \
+    || mourir "lecture du décalage de debug.log impossible (connexion SSH) : ne pas conclure d'une absence d'erreur avant d'avoir établi la lecture"
 
   out=$(remote_call merge-functions "$FUNCTIONS_BASELINE_SIZE" "$REQUIRE_LINE") \
     || mourir "fusion de functions.php refusée — voir le message ci-dessus, restaurer avec --rollback si nécessaire"
@@ -625,16 +644,30 @@ do_apply() {
   fi
   vert "  OK   functions.php : une ligne, $vsize o"
 
+  # Redirections suivies (-L) : / redirige en 301 vers /fr/ ou /en/ selon
+  # TranslatePress, sur les deux marques et les deux environnements, jamais
+  # une langue figée ici (brief-correctif-verification-apparence.md). Ce
+  # qu'on juge est le code de statut FINAL, jamais celui du premier saut.
   local http_code
-  http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://$HOTE/" || echo "000")
-  if [ "$http_code" != "200" ] && [ "$http_code" != "301" ] && [ "$http_code" != "302" ]; then
-    rouge "  KO   https://$HOTE/ répond $http_code"
-    mourir "le site ne répond pas normalement après déploiement — vérifier avant de continuer, --rollback si besoin"
-  fi
-  vert "  OK   https://$HOTE/ répond $http_code"
+  http_code=$(curl -s -o /dev/null -L -w '%{http_code}' --max-time 15 "https://$HOTE/" || echo "000")
+  case "$http_code" in
+    2??)
+      vert "  OK   https://$HOTE/ répond $http_code (redirections suivies)"
+      ;;
+    4??|5??)
+      rouge "  KO   https://$HOTE/ répond $http_code après redirections"
+      mourir "le site répond en erreur après déploiement — vérifier avant de continuer, --rollback si besoin"
+      ;;
+    *)
+      rouge "  KO   https://$HOTE/ répond $http_code après redirections"
+      mourir "le site ne répond pas normalement après déploiement — vérifier avant de continuer, --rollback si besoin"
+      ;;
+  esac
 
-  local tail_out
-  tail_out=$(remote_call debug-log-tail-since "$log_offset")
+  local tail_out tail_rc
+  tail_out=$(remote_call debug-log-tail-since "$log_offset"); tail_rc=$?
+  [ "$tail_rc" -eq 0 ] \
+    || mourir "lecture de debug.log impossible (connexion SSH) : absence d'erreur PHP non établie, ne pas conclure à un déploiement sain"
   if printf '%s' "$tail_out" | grep -qi "PHP Fatal error"; then
     rouge "  KO   une erreur fatale PHP est apparue dans debug.log depuis le déploiement"
     printf '%s\n' "$tail_out" | grep -i "PHP Fatal error" | sed 's/^/    /' >&2
@@ -647,12 +680,39 @@ do_apply() {
   fi
 
   if [ "$ENV" = "staging" ]; then
-    local body
-    body=$(curl -s --max-time 15 "https://$HOTE/" || true)
+    # Meme piege que le controle de statut ci-dessus, et c'est celui qui a
+    # produit le KO du 21 septembre : / redirige en 301 vers /fr/ (ou /en/,
+    # jamais une langue figee ici), le corps de cette reponse est vide, et y
+    # chercher le jeton d'apparence concluait a tort a son absence. On suit
+    # la redirection (-L) et on lit le code de statut FINAL dans le meme
+    # appel, pour juger sur la page vraiment servie
+    # (brief-correctif-verification-apparence.md). Une absence de jeton ne
+    # prouve rien tant que la lecture elle-meme n'est pas etablie comme
+    # valide : d'abord le code de sortie de curl, puis le statut final.
+    local fetch curl_rc body_http_code body
+    fetch=$(curl -s -L --max-time 15 -w '\n__ICL_STATUS__%{http_code}' "https://$HOTE/")
+    curl_rc=$?
+    if [ "$curl_rc" -ne 0 ]; then
+      mourir "lecture de https://$HOTE/ impossible (curl code $curl_rc) : apparence non vérifiée, une absence ne prouve rien tant que la lecture n'est pas établie"
+    fi
+    body_http_code=$(printf '%s\n' "$fetch" | sed -n 's/^__ICL_STATUS__//p')
+    body=$(printf '%s\n' "$fetch" | sed '$d')
+    case "$body_http_code" in
+      200)
+        ;;
+      4??|5??)
+        rouge "  KO   https://$HOTE/ répond $body_http_code après redirections"
+        mourir "apparence non vérifiable : la page finale répond en erreur, ce n'est pas un défaut d'apparence"
+        ;;
+      *)
+        rouge "  KO   https://$HOTE/ répond $body_http_code après redirections"
+        mourir "apparence non vérifiable : code de statut final inattendu, une absence de jeton ne serait pas probante"
+        ;;
+    esac
     if printf '%s' "$body" | grep -q -- '--srlm-'; then
       vert "  OK   l'apparence Sexcape Room est active sous le levier ($OVERRIDE_HOST)"
     else
-      rouge "  KO   aucun jeton --srlm- trouvé sur https://$HOTE/ alors que le levier est actif"
+      rouge "  KO   aucun jeton --srlm- trouvé sur https://$HOTE/ (statut final $body_http_code, lecture établie) alors que le levier est actif"
       mourir "apparence non confirmée — vérifier à l'œil avant de considérer ce déploiement terminé"
     fi
   fi

@@ -74,3 +74,19 @@ Pour revenir en arrière sur un fichier pas encore validé : `git restore <fichi
 Pour voir l'historique : `git log --oneline`.
 
 Un commit par phase du brief. Un message qui dit ce que le changement fait, pas quel fichier il touche.
+
+### Le dépôt est relié à GitHub depuis le 22 septembre 2026
+
+Jusque-là, il n'avait aucun remote : vingt-sept commits ne vivaient que sur le Mac de Thomas.
+
+- Remote `origin` : `git@github.com:tommybeck/icl-dev.git`, dépôt **privé**.
+- Authentification par clé SSH dédiée `~/.ssh/github_ed25519`, distincte de `icl_ed25519`
+  qui sert à SiteGround. Entrée `Host github.com` dans `~/.ssh/config` avec
+  `IdentitiesOnly yes` : sans elle, les deux clés seraient présentées.
+- Claude Code pousse après chaque commit revu.
+- **`git push` fait maintenant quelque chose.** Un commit reste local ; la poussée le publie.
+  Ne jamais dire « c'est dans le dépôt » pour dire « c'est poussé » : ce sont deux états.
+- **Aucun secret ne doit entrer dans un commit**, et la règle absolue n°2 prend ici tout son
+  poids : ce qui est poussé est publié, et un secret publié est un secret à révoquer, pas à
+  effacer. Un motif de clé ou de mot de passe dans un fichier suivi se traite avant le commit,
+  jamais après la poussée.

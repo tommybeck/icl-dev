@@ -38,9 +38,11 @@ demandait le prompt.
    liste des fichiers **suivis par git sous `mu-plugins/` et
    `themes/astra-child/`**, recalculée à chaque lancement — jamais une liste
    de fichiers figée dans le script (voir chapitre 3.4 : pourquoi, et ce que
-   ça change pour `--rollback`). Deux exclusions nominatives seulement,
+   ça change pour `--rollback`). Deux exclusions nominatives,
    `functions.php` et `style.css` du thème, les deux placeholders que le
-   chapitre 2 du constat de déploiement interdit de déployer. Additif, jamais
+   chapitre 2 du constat de déploiement interdit de déployer, **plus une
+   exclusion par motif** : tout chemin qui traverse un dossier `tests/`, quel
+   que soit le mu-plugin qui le porte (chapitre 3.5). Additif, jamais
    `--delete`.
 3. Vérification des empreintes `sha256` de chaque fichier copié contre sa
    source locale (chapitre 6.1 du constat de déploiement).
@@ -52,10 +54,13 @@ demandait le prompt.
    pour que la constante existe avant le bootstrap WordPress — l'ajouter après
    cette ligne l'aurait rendue inerte.
 6. Vérification (chapitre 6 du constat) : une seule ligne `require_once`, une
-   taille de fichier cohérente, le site répond (200/301/302, pas de 5xx), pas
-   de nouvelle erreur fatale PHP dans `debug.log` depuis le déploiement, et sur
-   la préproduction, le jeton d'apparence `--srlm-` présent dans la page
-   servie sous le levier actif.
+   taille de fichier cohérente, le site répond, **redirections suivies,
+   jugé sur le code de statut final** (2xx, un échec franc et distinct sur
+   4xx ou 5xx), pas de nouvelle erreur fatale PHP dans `debug.log` depuis le
+   déploiement — et cette lecture de `debug.log` elle-même refuse de
+   conclure si la connexion SSH qui la porte a échoué — et sur la
+   préproduction, le jeton d'apparence `--srlm-` présent dans le corps de la
+   page **après redirection**, servie sous le levier actif (chapitre 3.5).
 7. Sort en erreur au premier contrôle rouge, avec le message qui dit quoi
    corriger.
 
@@ -92,8 +97,9 @@ est prise côté local, en clair, jamais devinée) :
 | `--override-host` n'a rien à faire en production | argument passé | `--env production` et `--override-host` sont utilisés ensemble |
 | Remplacer un levier déjà posé avec une autre valeur | comparaison de la valeur existante | sans `--forcer-override` : deux essais de recette (marque A, marque B) ne doivent jamais s'écraser en silence |
 | Le point d'ancrage `wp-settings.php` est unique | `grep -n -F -x` | zéro ou plusieurs occurrences : insertion refusée plutôt que devinée |
-| Aucune erreur fatale PHP après le déploiement | `debug.log`, uniquement les octets écrits depuis l'offset pris juste avant la fusion | une ligne `PHP Fatal error` apparaît dans cette fenêtre |
-| Le site répond après déploiement | `curl` sur `https://<hôte>/` | code différent de 200/301/302 |
+| Aucune erreur fatale PHP après le déploiement | `debug.log`, uniquement les octets écrits depuis l'offset pris juste avant la fusion | une ligne `PHP Fatal error` apparaît dans cette fenêtre, **ou** la lecture SSH de l'offset ou de `debug.log` lui-même a échoué (chapitre 3.5 : une absence ne prouve rien tant que la lecture n'est pas établie) |
+| Le site répond après déploiement | `curl -L` sur `https://<hôte>/`, redirections suivies, code de statut **final** | code final hors 2xx, avec un message distinct sur 4xx/5xx contre les autres cas |
+| L'apparence Sexcape Room est active, en préproduction | `curl -L` sur `https://<hôte>/`, redirections suivies, jeton `--srlm-` cherché dans le corps de la réponse **finale** | le code de statut final n'est pas 200, ou `curl` lui-même échoue (chapitre 3.5), ou le jeton est absent alors que la lecture est établie |
 | **`--appliquer` en production** | argument | sans **aussi** `--confirmer-production` — un geste volontaire à deux mains, celui de Thomas, jamais celui de Code |
 
 Aucun de ces refus ne dépend d'un jugement fait sur le serveur : le script
@@ -203,6 +209,59 @@ qui pourrait diverger de la première. Vérifié dans le bac à sable en posant
 un faux `api-host.php` à côté du dépôt de ce chantier avant un
 `--rollback` : le faux fichier a survécu intact, tout le reste a été retiré.
 
+### 3.5 Un 301 rend un succès sur un échec, et une liste figée en cache un second
+
+**Correctif du 21 septembre**, suite au déploiement en préproduction du même
+jour : le script a rendu
+
+```
+KO   aucun jeton --srlm- trouvé sur https://staging13.linstantcle.ch/ alors que le levier est actif
+ERREUR : apparence non confirmée
+```
+
+alors que trois lectures indépendantes établissaient le contraire — le
+levier posé, l'apparence calculée par `lme_sexcaperoom_current_appearance()`,
+et **57 jetons `--srlm-` bien présents dans la page**. `/` est redirigé en
+301 vers `/fr/` par TranslatePress, sur les deux marques et les deux
+environnements ; la vérification appelait l'URL racine sans suivre la
+redirection, lisait donc le corps vide de la réponse 301, et concluait à
+tort à une absence. **Un succès rendu comme un échec** — le symétrique exact
+de la règle n°6 du `CLAUDE.md`, « aucun échec silencieux » — décrit en
+détail dans `brief-correctif-verification-apparence.md`.
+
+**Correctif :** la vérification d'apparence, et la vérification générale que
+le site répond, suivent désormais les redirections (`curl -L`) et jugent sur
+le **code de statut final**, avec un échec franc et distinct sur 4xx ou 5xx.
+Aucune langue n'est visée en dur : `/fr/` n'apparaît nulle part dans le
+script, c'est TranslatePress qui décide où `/` redirige. Vérifié en local
+contre un petit serveur HTTP jetable reproduisant le même 301 vers `/fr/` :
+le jeton, présent seulement derrière la redirection, est maintenant trouvé ;
+un 500 en bout de redirection produit un message distinct (« la page finale
+répond en erreur ») et non une conclusion d'apparence absente.
+
+**Même relecture appliquée à toute autre vérification qui concluait d'une
+absence**, chapitre 5 du brief : la lecture de `debug.log` recherchait
+l'absence de `PHP Fatal error` sans jamais vérifier que la lecture SSH avait
+elle-même réussi — un incident de connexion transitoire aurait produit un
+`tail_out` vide et un « OK » silencieux, alors qu'aucune lecture n'avait eu
+lieu. Le script refuse désormais (`mourir`) si la prise de l'offset ou la
+lecture du journal depuis cet offset échoue, plutôt que d'interpréter le
+silence comme une preuve de santé.
+
+**Prérequis de B10, dans la même passe :** `mu-plugins/lme-brands/tests/test-core.php`
+est suivi par git, donc déployé par la liste dynamique du chapitre 3.4, et
+reste exécutable par une simple requête HTTP, sans garde `ABSPATH`, comme
+`plan-de-marche.md` §B9 le relevait. L'exclusion nominative à deux entrées
+gagne une exclusion par **motif** : tout chemin qui traverse un dossier
+`tests/`, quel que soit le mu-plugin qui le porte — un motif, pas une
+énumération, donc il ne grossira pas avec le temps, sans contredire
+l'argument du chapitre 3.4 contre les listes figées. Vérifié contre l'état
+réel du dépôt : `mu-plugins/lme-brands/tests/test-core.php` sort désormais du
+manifeste, aux côtés des deux exclusions nominatives déjà en place. **Ce
+correctif exclut le fichier des futurs déploiements ; il ne retire pas
+l'exemplaire déjà présent sur le serveur**, `rsync` restant additif — ce
+retrait reste à faire séparément, hors de cette passe qui ne déploie rien.
+
 ---
 
 ## 4. Méthode de test, sans toucher aux deux sites réels
@@ -232,7 +291,12 @@ un faux `api-host.php` à côté du dépôt de ce chantier avant un
   accepté) et recherche du jeton `--srlm-` (absent aujourd'hui, attendu
   puisque le levier n'est pas encore posé) — les deux branches de la
   vérification du chapitre 6 ont donc été exercées contre le vrai serveur,
-  pas seulement lues dans le code.
+  pas seulement lues dans le code. **Correctif du 21 septembre (chapitre
+  3.5) :** le déploiement réel du même jour a montré que ce 301 devait être
+  suivi, pas seulement accepté ; le correctif a été revérifié contre un
+  serveur HTTP jetable local reproduisant le même 301 vers `/fr/`, jamais
+  contre les deux sites réels, conformément à la consigne « ne rien
+  déployer » de ce correctif.
 - **`--appliquer` en production n'a jamais été exécuté**, ni pour de vrai ni
   en bac à sable : ce geste reste, dans cette session comme dans toutes les
   suivantes, celui de Thomas.
@@ -280,5 +344,6 @@ un faux `api-host.php` à côté du dépôt de ce chantier avant un
 
 | Version | Date | Modification |
 |---|---|---|
+| 1.2 | 2026-09-21 | Correctif après le KO en préproduction du même jour (chapitre 3.5) : la vérification d'apparence et le contrôle général de réponse HTTP suivent désormais les redirections et jugent sur le code de statut final, échec franc et distinct sur 4xx/5xx, sans viser aucune langue en dur. La lecture de `debug.log` refuse de conclure si la connexion SSH qui la porte échoue, plutôt que d'interpréter un silence comme une preuve de santé. Exclusion des racines déployées étendue d'une exclusion nominative à un motif : tout chemin traversant `tests/`, prérequis de B10. Revérifié en local contre un serveur HTTP jetable, jamais contre `staging13` ni la production. |
 | 1.1 | 2026-09-21 | La liste des fichiers à copier et à retirer ne vient plus d'une énumération figée dans le script : elle est recalculée à chaque lancement depuis `git ls-files` sous `mu-plugins/` et `themes/astra-child/`, moins les deux exclusions nominatives. Revérifié en bac à sable : un fichier ajouté au dépôt apparaît sans toucher au script, et `--rollback` épargne un fichier voisin non suivi par ce chantier. |
 | 1.0 | 2026-09-21 | Création. Script `deployer-moteur.sh`, testé en lecture seule contre la préproduction et la production réelles, et en écriture contre un bac à sable jetable sur le même serveur. Trois trouvailles : la traduction automatique de la sortie `wp-cli`, l'accès refusé à la base de préproduction pour l'utilisateur MySQL en lecture seule (contourné par `wp-cli`, jamais par une nouvelle lecture d'identifiants), et un piège de code de sortie sur `grep -c` corrigé avant tout usage réel. |
