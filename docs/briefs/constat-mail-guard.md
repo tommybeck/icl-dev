@@ -10,6 +10,18 @@ déployé par ce constat, aucune ligne n'est écrite en base, aucune clé n'a
 répertoires du serveur, et par `curl -I` sur des URL publiques — jamais un
 secret, jamais `wp-config.php`.
 
+**Addendum du même jour (chapitre 10) : levée de la réserve bloquante de
+plan-de-marche.md §B9e.** Mêmes garanties, avec une lecture en plus :
+`wp-config.php`, en production, mais **par clé nommée explicite
+uniquement** — `DISABLE_WP_CRON` et `WP_ENVIRONMENT_TYPE`, jamais un
+affichage du fichier ni une clé au hasard — conformément à la règle
+absolue n°2 de `CLAUDE.md`. Aucune des deux n'y est définie ; ni l'une ni
+l'autre n'est un secret. Le reste des lectures de l'addendum porte sur du
+code public du cœur WordPress (`wp-includes/cron.php`,
+`wp-includes/load.php`) et de VikBooking
+(`wp-content/plugins/vikbooking/libraries/system/cron.php`), toutes en
+lecture seule par SSH.
+
 ---
 
 ## 1. La forme réelle de `$args['headers']`, établie en lisant `wp_mail()` du cœur
@@ -286,8 +298,127 @@ pas.
 
 ---
 
+## 10. La réserve levée : le cron hors requête HTTP
+
+22 septembre 2026, en réponse à la réserve bloquante du plan de marche
+§B9e : `lme_mail_guard_is_production_context()` rendait `false` dès que
+l'hôte était absent, donc hors de toute requête HTTP — WP-CLI, ou un cron
+lancé en ligne de commande. En production, l'envoi n'y était alors ni
+reconnu comme production, ni détourné (pas d'adresse fourre-tout à y
+livrer), et `pre_wp_mail` l'abandonnait.
+
+### 10.1 — comment le cron est réellement déclenché sur cet hébergement, établi et non supposé
+
+Lecture seule, par SSH (`sg-linstantcle`), sur trois fichiers :
+
+1. **`wp-config.php` de production ne définit pas `DISABLE_WP_CRON`**
+   (`grep -n 'DISABLE_WP_CRON' ~/www/linstantcle.ch/public_html/wp-config.php`
+   — aucune correspondance). C'est la constante qui, si elle valait `true`,
+   signalerait un vrai cron système externe (typiquement une tâche Site
+   Tools de SiteGround appelant `wp cron event run` en ligne de commande).
+   Absente, elle laisse WordPress à son comportement par défaut.
+2. **Ce comportement par défaut est celui de `spawn_cron()`**, lu dans
+   `wp-includes/cron.php` du cœur (même installation, même jour) :
+   `$cron_url = add_query_arg( 'doing_wp_cron', $doing_wp_cron, site_url( 'wp-cron.php' ) );`
+   suivi de `wp_remote_post( $cron_request['url'], $cron_request['args'] )`
+   (`cron.php:961` et `:999`). C'est une **vraie requête HTTP**, adressée à
+   l'hôte du site lui-même — elle porte donc un `HTTP_HOST` égal à l'hôte
+   de production, exactement comme n'importe quelle requête de visiteur.
+3. **Le rappel avant séjour de Vik passe par ce même mécanisme**, pas par
+   un point d'entrée séparé : `VikBookingCron::setup()`
+   (`wp-content/plugins/vikbooking/libraries/system/cron.php`) enregistre
+   ses tâches par `add_action( $hook, … )` puis `wp_schedule_event( time(),
+   $interval, $hook )` — l'API native de WP-Cron, pas un script CLI ou une
+   URL propre à Vik. La docblock de `VikBookingCron::runJob()` le confirme
+   explicitement : « require the main library in case WPCron runs the
+   job », « Initialize timezone handler when WP-Cron executes the job ».
+
+**Conclusion, établie et non supposée : sur cet hébergement, aujourd'hui,
+le rappel avant séjour de Vik s'exécute par la boucle HTTP de WP-Cron, qui
+porte un `HTTP_HOST`.** Aucun rappel de production ne disparaissait donc
+avant ce jour du fait de la réserve — mais la réserve restait réelle :
+`wp-config.php` peut se voir ajouter `DISABLE_WP_CRON` à tout moment
+depuis Site Tools (fonctionnalité SiteGround de « vrai cron » serveur, qui
+appelle alors `wp cron event run` sans `HTTP_HOST`), sans qu'aucune ligne
+de ce dépôt ne change et sans que quiconque relise ce constat à ce
+moment-là. WP-CLI est d'ailleurs déjà installé sur le serveur
+(`/usr/local/bin/wp`), donc un appel manuel en ligne de commande — par
+Thomas, par le support SiteGround, ou par une tâche future — est possible
+dès aujourd'hui. Le crontab système du compte n'est, lui, pas consultable
+depuis ce shell (`crontab -l` : commande absente, restriction normale de
+l'environnement CageFS de SiteGround) : son absence de preuve n'est pas
+une preuve d'absence, et c'est une raison de plus de corriger la fonction
+plutôt que de se fier au seul mécanisme observé aujourd'hui.
+
+### 10.2 — le correctif : `wp_get_environment_type()` seul quand l'hôte est absent
+
+`lme_mail_guard_is_production_context()` (`includes/core.php`) ne rend
+plus `false` par défaut quand l'hôte est absent. Elle rend désormais la
+valeur de `'production' === $environment_type` seule pour ce cas : pas
+d'hôte à vérifier, donc rien à comparer à la liste des hôtes de
+production. Établi par lecture de `wp_get_environment_type()` du cœur
+(`wp-includes/load.php:250-299`, même serveur, même jour) : sans
+`WP_ENVIRONMENT_TYPE` défini — confirmé absent du `wp-config.php` de
+production par la même méthode qu'au 10.1 — la fonction retombe sur son
+défaut `'production'` (`load.php:294-296`). La branche ajoutée reconnaît
+donc la production réelle de cette installation, pas une hypothèse sur ce
+que vaudrait la constante.
+
+La préproduction n'est pas affectée : le premier `if` de la fonction
+écarte déjà tout `$environment_type` différent de `'production'` avant
+que l'hôte ne soit even regardé, donc `'staging'` (valeur du levier de
+préproduction, chapitres précédents) continue de tout détourner, hôte
+présent ou non.
+
+Deux tests ajoutés à `tests/test-core.php`, et le test qui figeait
+l'ancien comportement corrigé plutôt que supprimé (son intitulé et sa
+valeur attendue changent, pas sa position) :
+
+- `is_production_context( 'production', null, $prod_hosts )` attend
+  désormais `true` (régression du défaut de la réserve).
+- `is_production_context( 'staging', null, $prod_hosts )` attend `false`
+  (l'absence d'hôte ne fait jamais basculer une préproduction en
+  production).
+- `should_redirect( 'production', null, $prod_hosts, false )` attend
+  `false` : un rappel de production lancé par WP-CLI ou un cron en ligne
+  de commande n'est plus détourné ni abandonné.
+
+```
+$ php mu-plugins/lme-mail-guard/tests/test-core.php
+47 tests, 0 échec(s).
+```
+
+(44 tests au 22 septembre, version 1.0 ; 3 ajoutés ici, aucun retiré,
+aucun autre modifié.)
+
+### 10.3 — la journalisation de tout abandon, déjà conforme, vérifiée et non recodée
+
+Relecture de `includes/guard.php` à la lumière de la règle n°3 de la
+commande : « tout abandon d'envoi se journalise, avec ou sans marque
+résolue ». `lme_mail_guard_maybe_abort_send()` journalise déjà
+`catchall_not_configured` en erreur de façon **inconditionnelle**, juste
+avant de retourner `false` — cet appel ne dépend pas du résultat de
+`lme_mail_guard_maybe_warn_brand_host()` (qui, lui, ne journalise qu'un
+avertissement **supplémentaire**, et seulement si l'hôte résout une
+marque). Un abandon sans hôte, donc sans marque résolue, journalise donc
+déjà l'erreur `catchall_not_configured` — vérifié par lecture, aucune
+correction nécessaire ici, et aucun test ajouté pour ce point : ce fichier
+consomme `wp_get_environment_type()`, `add_filter()` et `error_log()`, il
+n'est pas testable sans site WordPress au sens de `tests/test-core.php`
+(même limite, déjà documentée, que pour `mu-plugins/lme-brands`, qui n'a
+lui non plus qu'un `tests/test-core.php`).
+
+Un effet de bord du correctif 10.2, à noter : puisqu'un envoi de
+production avec hôte absent n'est désormais plus détourné du tout (il
+part normalement), il n'atteint plus jamais `maybe_abort_send()` — il n'y
+a donc plus d'abandon à journaliser dans ce cas précis, parce qu'il n'y a
+plus d'abandon.
+
+---
+
 ## Journal des versions
 
 | Version | Date | Modification |
 |---|---|---|
 | 1.0 | 2026-09-22 | Création. `mu-plugins/lme-mail-guard/` écrit : quatre défauts du brief corrigés (1.a-1.d), deux durcissements appliqués (2.a-2.b), forme réelle de `$args['headers']` établie par lecture de `wp_mail()` du cœur sur le serveur, liste des hôtes de production établie par preuve (SSH, inodes, `curl -I`) plutôt que devinée depuis les entrées Markdown illisibles du brief. 44 tests unitaires purs, 0 échec. Rien de déployé, rien écrit en base, aucune clé lue. |
+| 1.1 | 2026-09-22 | Réserve bloquante de plan-de-marche.md §B9e levée. Établi par lecture du serveur (wp-config.php, wp-includes/cron.php, wp-includes/load.php, vikbooking/libraries/system/cron.php) que le rappel avant séjour de Vik s'exécute aujourd'hui par la boucle HTTP par défaut de WP-Cron, qui porte un `HTTP_HOST` — aucun rappel de production n'a donc disparu jusqu'ici, mais la réserve restait réelle (SiteGround peut activer un vrai cron CLI sans toucher au dépôt, et WP-CLI est déjà installé sur le serveur). `lme_mail_guard_is_production_context()` décide désormais sur `wp_get_environment_type()` seul quand l'hôte est absent, la préproduction continuant de tout détourner. 3 tests ajoutés (47 au total, 0 échec), le test qui figeait l'ancien comportement corrigé plutôt que supprimé. La journalisation inconditionnelle de tout abandon (`catchall_not_configured`), déjà conforme à la règle absolue n°6, relue et confirmée sans modification. Rien de déployé, rien écrit en base, aucune clé lue. |

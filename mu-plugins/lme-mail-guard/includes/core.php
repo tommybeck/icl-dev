@@ -24,12 +24,27 @@
 /**
  * Décide si l'environnement courant est la production, au sens strict
  * exigé par docs/briefs/brief-redirection-emails-hors-production.md
- * chapitre 2.a : deux conditions, jamais une seule.
+ * chapitre 2.a : deux conditions quand l'hôte est connu, jamais une seule.
  *
  * Ne pas se fier à `option_home` (ou à toute valeur qu'un autre greffon
  * réécrit, comme lme-brands le fait pour cette option) : `$host` doit
  * venir de `$_SERVER['HTTP_HOST']`, normalisé, jamais d'une option ou
  * d'une URL calculée.
+ *
+ * Réserve levée le 22 septembre 2026 (plan-de-marche.md §B9e) : quand
+ * l'hôte est absent — WP-CLI, ou un cron déclenché en ligne de commande,
+ * aucun des deux n'ayant de requête HTTP donc pas de `HTTP_HOST` — il n'y
+ * a rien à comparer à la liste des hôtes de production, et exiger quand
+ * même une correspondance revenait à ne jamais reconnaître la production
+ * dans ce contexte. `wp_get_environment_type()` seul décide alors : sur
+ * cette installation, établi par lecture directe de wp-config.php et de
+ * wp-includes/load.php le 22 septembre 2026 (docs/briefs/constat-mail-guard.md
+ * chapitre 1), la production ne définit pas `WP_ENVIRONMENT_TYPE` et
+ * `wp_get_environment_type()` y retombe sur son défaut `'production'` —
+ * donc cette branche reconnaît bien la production réelle, pas une
+ * hypothèse. La préproduction, où la constante vaut `'staging'`, continue
+ * de tout détourner : le premier `if` de cette fonction l'a déjà exclue
+ * avant qu'on regarde l'hôte.
  *
  * @param string      $environment_type Valeur de wp_get_environment_type().
  * @param string|null $host             Hôte HTTP courant, déjà normalisé
@@ -46,7 +61,11 @@ function lme_mail_guard_is_production_context( $environment_type, $host, array $
 	}
 
 	if ( ! is_string( $host ) || '' === $host ) {
-		return false;
+		// Hors requête HTTP : pas d'hôte à vérifier, wp_get_environment_type()
+		// tranche seul. Ne jamais retourner false ici — un rappel Vik lancé
+		// par le cron de production disparaîtrait sans avertissement
+		// (plan-de-marche.md §B9e).
+		return true;
 	}
 
 	$normalized_list = array_map( 'strtolower', $production_hosts );

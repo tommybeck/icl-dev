@@ -87,9 +87,19 @@ lme_mail_guard_test_assert_same(
 	'environnement production mais hôte hors liste = pas la production'
 );
 lme_mail_guard_test_assert_same(
-	false,
+	true,
 	lme_mail_guard_is_production_context( 'production', null, $prod_hosts ),
-	'hôte absent (CLI, cron sans requête HTTP) = pas la production'
+	"hôte absent (CLI, cron sans requête HTTP) mais environnement 'production' = production quand même — réserve de plan-de-marche.md §B9e levée, wp_get_environment_type() seul décide faute d'hôte à vérifier"
+);
+lme_mail_guard_test_assert_same(
+	false,
+	lme_mail_guard_is_production_context( 'staging', null, $prod_hosts ),
+	"hôte absent ET environnement 'staging' = pas la production — l'absence d'hôte ne fait jamais basculer une préproduction en production"
+);
+lme_mail_guard_test_assert_same(
+	false,
+	lme_mail_guard_is_production_context( '', null, $prod_hosts ),
+	"hôte absent ET environnement vide/inconnu = pas la production"
 );
 lme_mail_guard_test_assert_same(
 	false,
@@ -123,6 +133,11 @@ lme_mail_guard_test_assert_same(
 	true,
 	lme_mail_guard_should_redirect( 'staging', null, $prod_hosts, false ),
 	'ni environnement ni hôte de production = détourner'
+);
+lme_mail_guard_test_assert_same(
+	false,
+	lme_mail_guard_should_redirect( 'production', null, $prod_hosts, false ),
+	"production réelle, hôte absent (WP-CLI, cron en ligne de commande), pas de forçage = ne pas détourner — c'est le rappel de production de plan-de-marche.md §B9e qui ne doit plus être avalé"
 );
 
 echo "== lme_mail_guard_normalize_headers() : forme réelle de wp_mail(), défaut 1.c ==\n";
