@@ -1012,6 +1012,69 @@ lme_brands_test_assert(
 	'registre réel : une chambre inconnue produit une identité qui ne nomme aucune des deux marques'
 );
 
+// --- Correctif du 22 septembre 2026 (B9c) : la vraie signature du rappel de paiement --
+
+echo "\nCorrectif B9c, signature réelle de payment_before_begin_transaction_vikbooking\n";
+
+/**
+ * Reproduit en PHP pur, pour ce test seulement, le bloc de compatibilité
+ * ascendante de do_action() (wp-includes/plugin.php, cœur WordPress) : un
+ * argument de la forme array($objet) — un tableau à un seul élément qui est
+ * un objet — est déballé avant l'appel du rappel, relu à l'identique sur
+ * les deux environnements (constat-fatal-page-paiement.md §2). Ni core.php
+ * ni includes/payment-brand.php n'ont besoin de cette fonction : c'est
+ * WordPress lui-même qui fait ce travail en production. Elle n'existe ici
+ * que pour exercer, sans site WordPress, ce que le rappel reçoit
+ * réellement quand Vik appelle `do_action($hook, array(&$this))`
+ * (payment.php:329).
+ *
+ * @param mixed $arg
+ * @return mixed
+ */
+function lme_brands_test_simulate_do_action_unwrap( $arg ) {
+	if ( is_array( $arg ) && 1 === count( $arg ) && isset( $arg[0] ) && is_object( $arg[0] ) ) {
+		return $arg[0];
+	}
+
+	return $arg;
+}
+
+$test_payment_stub = new stdClass();
+$test_hook_arg      = lme_brands_test_simulate_do_action_unwrap( array( &$test_payment_stub ) );
+
+lme_brands_test_assert(
+	$test_hook_arg === $test_payment_stub,
+	"do_action(\$hook, array(&\$this)) livre l'objet de paiement directement au rappel, jamais un tableau à l'indice 0 — vraie signature établie par constat-fatal-page-paiement.md §2"
+);
+
+$test_old_code_threw = false;
+try {
+	// La forme du 17 septembre, payment-brand.php:73 avant ce correctif :
+	// $payment = isset( $args[0] ) ? $args[0] : null; — appliquée à
+	// l'argument réellement livré au rappel (un objet, jamais un tableau).
+	isset( $test_hook_arg[0] );
+} catch ( \Error $e ) {
+	$test_old_code_threw = true;
+}
+
+lme_brands_test_assert(
+	$test_old_code_threw,
+	"non-régression directe du défaut : isset(\$args[0]) sur l'objet réellement livré au rappel lève une Error PHP8 (« Cannot use object ... as array »), reproduisant le plantage de production du 21 septembre à l'identique — ce test aurait échoué sur le code du 17 septembre, faute d'attraper cette Error"
+);
+
+$test_new_code_threw   = false;
+$test_new_code_result  = null;
+try {
+	$test_new_code_result = is_object( $test_hook_arg );
+} catch ( \Error $e ) {
+	$test_new_code_threw = true;
+}
+
+lme_brands_test_assert(
+	! $test_new_code_threw && true === $test_new_code_result,
+	'la forme corrigée (payment-brand.php:87, is_object($payment) sur l\'argument reçu directement) reconnaît l\'objet de paiement sans lever d\'erreur'
+);
+
 // --- Résultat -------------------------------------------------------------------
 
 $count    = $GLOBALS['lme_brands_test_count'];

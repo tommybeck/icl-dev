@@ -6,9 +6,23 @@
  * (.local/vikbooking/libraries/adapter/payment/payment.php:329,
  * JPayment::showPayment()), qui se déclenche avant beginTransaction() —
  * donc avant que VikStripe ne construise la configuration de la session
- * Stripe (constat-phase-0.md Q5). L'appel est `do_action($hook, array(&$this))` :
- * le rappel reçoit un tableau dont l'indice 0 est l'objet de paiement, pas
- * l'objet directement — piège relevé dans ce même constat.
+ * Stripe (constat-phase-0.md Q5).
+ *
+ * Correctif du 22 septembre 2026 (constat-fatal-page-paiement.md) : Vik
+ * construit bien l'appel comme `do_action($hook, array(&$this))`, mais
+ * `do_action()` du cœur WordPress (wp-includes/plugin.php) déballe
+ * automatiquement ce motif — un tableau à un seul élément qui est un objet —
+ * avant d'appeler les rappels, pour compatibilité ascendante avec le style
+ * PHP4 de `array(&$this)`. **Le rappel reçoit donc l'objet de paiement
+ * directement, jamais un tableau dont l'indice 0 le contiendrait.** La
+ * version précédente de ce fichier affirmait l'inverse (« le rappel reçoit
+ * un tableau ») : c'était la lecture littérale du seul code de Vik,
+ * correcte pour `payment.php:329` pris isolément mais fausse une fois
+ * WordPress ajouté, et elle a fait planter tout paiement Stripe, les deux
+ * marques, les deux environnements, dès l'activation de ce mu-plugin —
+ * `isset( $args[0] )` sur un objet qui n'implémente pas `ArrayAccess` lève
+ * une `Error` fatale sous PHP 8. Ne pas reproduire cette prémisse ailleurs
+ * dans ce plugin : `constat-phase-0.md` §Q5 porte la même correction.
  *
  * Restreint à `isDriver('stripe')` : c'est la seule passerelle publiée
  * aujourd'hui (constat-reserve-paiement.md §2, sir_vikbooking_gpayments
@@ -67,11 +81,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 add_action( 'payment_before_begin_transaction_vikbooking', 'lme_brands_brand_payment_transaction', 10, 1 );
 
 /**
- * @param array $args Indice 0 : l'objet de paiement (JPayment), par référence.
+ * @param object $payment L'objet de paiement (JPayment), livré directement
+ *                         par do_action() — voir la note en tête de fichier.
  */
-function lme_brands_brand_payment_transaction( $args ) {
-	$payment = isset( $args[0] ) ? $args[0] : null;
-
+function lme_brands_brand_payment_transaction( $payment ) {
 	if ( ! is_object( $payment ) || ! method_exists( $payment, 'isDriver' ) || ! $payment->isDriver( 'stripe' ) ) {
 		return;
 	}
@@ -126,10 +139,9 @@ function lme_brands_brand_payment_transaction( $args ) {
 	}
 
 	$brand_key = $resolution['brand_key'];
-	$brand     = $config['brands'][ $brand_key ];
 
 	lme_brands_set_payment_metadata( $payment, $brand_key, $resolution['room_ids'], $booking_id );
-	lme_brands_correct_payment_urls( $payment, $brand_key, $brand['host'], $booking_id );
+	lme_brands_correct_payment_urls( $payment, $brand_key, lme_brands_current_raw_http_host(), $booking_id );
 }
 
 /**
@@ -172,12 +184,46 @@ function lme_brands_set_payment_metadata( $payment, $brand_key, array $room_ids,
  * devrait déjà le porter (voir la note en tête de fichier) — d'où une
  * alerte, jamais un silence.
  *
- * @param object $payment
- * @param string $brand_key
- * @param string $host
- * @param int    $booking_id
+ * La cible est l'hôte HTTP **réel** de la requête courante
+ * (`lme_brands_current_raw_http_host()`), jamais `$config['brands'][$brand_key]['host']`,
+ * l'hôte déclaré au registre. Même raisonnement et même preuve que le
+ * correctif du 22 septembre 2026 à `includes/url-rewrite.php`
+ * (constat-correctif-url-rewrite.md) : en production, l'hôte de la marque
+ * résolue et l'hôte réel de la requête sont égaux par construction, donc
+ * viser l'un ou l'autre ne change rien. Mais cette fonction s'exécute
+ * pendant la même requête que le rendu de la page de paiement — la requête
+ * que `url-rewrite.php` filtre déjà vers l'hôte réel — donc sous le levier
+ * de préproduction B8, viser le registre y referait exactement la fuite du
+ * 21 septembre : `return_url`, `error_url` et `notify_url` seraient
+ * « corrigées » de l'hôte réel de la préproduction vers l'hôte de
+ * *production* de la marque. Cette fonction n'a jamais pu s'exécuter avant
+ * ce correctif — la fatale de `constat-fatal-page-paiement.md` l'en
+ * empêchait — donc ce défaut n'a jamais été observé en pratique, mais rien
+ * dans sa logique ne l'aurait empêché de se produire.
+ *
+ * @param object      $payment
+ * @param string      $brand_key
+ * @param string|null $host       Hôte HTTP réel de la requête courante, ou
+ *                                 null si indisponible.
+ * @param int         $booking_id
  */
 function lme_brands_correct_payment_urls( $payment, $brand_key, $host, $booking_id ) {
+	if ( ! is_string( $host ) || '' === $host ) {
+		lme_brands_log(
+			'error',
+			'payment_url_host_unavailable',
+			sprintf(
+				"Hôte HTTP réel introuvable pour la réservation #%d : impossible de vérifier ou de corriger l'hôte de 'return_url', 'error_url' et 'notify_url'.",
+				$booking_id
+			),
+			array(
+				'booking_id' => $booking_id,
+				'brand_key'  => $brand_key,
+			)
+		);
+		return;
+	}
+
 	foreach ( array( 'return_url', 'error_url', 'notify_url' ) as $key ) {
 		$original = $payment->get( $key );
 
