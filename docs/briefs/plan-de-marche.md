@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.7, 21 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.7 pose la recette en deux passes, une par marque, et acte les deux correctifs remontés par la première recette.
+**Version 2.9, 22 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.9 acte B9b et B9c : la phase 4 n'avait jamais fonctionné, elle est corrigée et reste à recetter. Elle ouvre B9d, la vérification des signatures de crochets.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -76,15 +76,17 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B2 | Filtrage des chambres, présentation puis garde | Sonnet 5, moyen | **fait**, deux correctifs compris |
 | B3 | E-mails par marque | Opus 5, élevé | **écrite et revue. Déployable** : C2 est fait |
 | B4a | Réserve de paiement, lecture seule | Opus 5, élevé | **fait**, et la réponse est mauvaise, voir §6 |
-| B4 | Paiement, retour, page de confirmation | Sonnet 5, moyen | **fait** le 17 septembre, commit `6a82070`, revue faite. Critère de recette n°8 laissé ouvert, décision de Thomas |
+| B4 | Paiement, retour, page de confirmation | Sonnet 5, moyen | livrée le 17 septembre, **cassée jusqu'au 22**, corrigée par B9c. **Toujours pas recettée** : elle n'a jamais tourné une seule fois. Critère de recette n°8 toujours ouvert |
 | B4b | Examiner la nouvelle version de VikStripe avant d'écrire à E4J | Opus 5, élevé | **fait** le 18 septembre, commit `6fe7ef0`. C'est la même 2.2.4, le défaut est intact, aucun webhook. Revue du 19 : conclusion tenue, mais « elle n'a jamais tourné » n'est pas démontré |
 | B5 | Marquer les rappels avant séjour, par `vikbooking_before_send_mail` | Opus 5, élevé | **livrée** le 17 septembre, commit `c22f5b7`, `constat-b5-rappels.md`, rien de déployé. **Revue Cowork non faite, et elle passe avant B6** |
 | B6 | Parade de la réserve de paiement | **Opus 5, élevé** | **lançable** : la parade est tranchée le 21 septembre, voir ci-dessous. Passe après la revue de B5 |
 | B7 | Identité d'envoi des repas et des bons cadeaux | Sonnet 5, moyen | ouvert, attend une décision de Thomas |
 | B8 | Levier de préproduction et inventaire de déploiement | Sonnet 5, moyen | **fait** le 20 septembre, commit `fade08b`, `constat-deploiement-moteur.md`, revue faite. 120 tests au vert |
 | B9 | Script de déploiement, de vérification et de retour arrière | Sonnet 5, moyen | **fait** le 21 septembre, commits `289339e` et `125e65b`, `constat-script-deploiement.md`, revue faite. Une réserve avant la production, ci-dessous |
-| B9b | Deux correctifs après la première recette : la réécriture d'URL en préproduction, et l'erreur fatale de la page de paiement | Sonnet 5, moyen | **nouveau, et bloquant pour la recette**, `brief-correctif-levier-et-fatal-paiement.md` |
-| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis : l'exclusion `tests/` du script**, voir ci-dessous |
+| B9b | Réécriture d'URL en préproduction, et constat de l'erreur fatale | Sonnet 5, moyen | **fait** le 22 septembre, commit `cb46ba8`, deux constats, revue faite |
+| B9c | Corriger `payment-brand.php`, et la prémisse fausse qui l'a produit | Sonnet 5, moyen | **fait** le 22 septembre, commit `f7a740a`, `constat-correctif-signature-paiement.md`, revue faite |
+| B9d | Vérifier la signature réelle de chaque crochet auquel `lme-brands` s'accroche | Sonnet 5, faible | **nouveau**, avant B10 |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Trois prérequis : B9d, l'exclusion `tests/`, et la recette en deux passes** |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
@@ -142,6 +144,26 @@ Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette r
 **Une erreur fatale.** Réservation de test du Boudoir, une nuit, 253 CHF : le récapitulatif s'affiche, puis « Une erreur grave s'est produite sur ce site ». Après création de la commande, pendant le rendu de la page de paiement. `payment-brand.php` est le premier suspect, et la question décisive est de savoir si la cause tient au levier ou si elle frapperait aussi la production.
 
 Les deux vont à **B9b**, brief `brief-correctif-levier-et-fatal-paiement.md`.
+
+### B9b et B9c — la phase 4 n'avait jamais fonctionné
+
+**Établi le 22 septembre.** À `payment-brand.php:73`, `$args[0]` était lu alors que le rappel reçoit l'objet de paiement directement. Erreur fatale avant même le test `isDriver('stripe')`, donc **avant toute résolution de marque** : le paiement de toute réservation était cassé, les deux marques, les deux environnements, pour n'importe quelle passerelle, dès que ce mu-plugin est actif. Aucun client touché, rien n'étant déployé en production.
+
+**La cause, corrigée à sa source.** Vik appelle bien `do_action($hook, array(&$this))`, mais `do_action()` **déballe** ce motif — un tableau d'un seul élément contenant un objet — par compatibilité ascendante avec le style PHP4. La prémisse de `constat-phase-0.md` §Q5 était la lecture littérale du code de Vik seul : juste pour `payment.php:329` pris isolément, fausse une fois WordPress ajouté. Corrigée à la source, le paragraphe fautif conservé et désigné comme faux plutôt que remplacé en silence. Trois tests ajoutés, qui échouent sur le code du 17 septembre.
+
+**Deux correctifs d'hôte, le même.** `url-rewrite.php` (B9b) et `lme_brands_correct_payment_urls()` (B9c) visaient le `host` déclaré au registre ; les deux visent désormais l'hôte réel de la requête, la marque résolue ne servant plus qu'à décider s'il faut réécrire. En production le geste est un no-op par construction, en préproduction il garde tout sur la préproduction.
+
+**Ce qui reste.** La phase 4 est corrigée, elle n'est pas recettée : elle n'a jamais tourné une seule fois de bout en bout. La vérification n°6 sera la première à la mettre à l'épreuve.
+
+### B9d — vérifier la signature réelle de chaque crochet
+
+**Pourquoi, et c'est la vraie leçon.** Cowork a d'abord écrit que « les 120 tests passaient parce qu'ils simulaient la forme fausse ». **C'est faux, et c'était écrit sans vérification** : les tests d'alors ne touchaient pas du tout `payment-brand.php`, ni sous sa forme fausse ni sous aucune forme. La faute est du même ordre que celle qu'elle décrivait.
+
+La leçon réelle est plus large. **Une fonction accrochée à un crochet tiers a été livrée et revue sans un seul test.** Les tests de ce plugin couvrent `core.php`, des fonctions pures ; aucun rappel accroché à un crochet de Vik ou de WordPress n'est exercé, ce qui se défend puisqu'ils demandent WordPress. Ce qui ne se défend pas : **la forme des arguments que chaque rappel reçoit repose sur une lecture du code de Vik seul**, alors que c'est WordPress qui les livre et qu'il les transforme.
+
+**Ce que B9d vérifie**, une fois, sans rien déployer : pour chaque crochet auquel `lme-brands` s'accroche — les cinq filtres d'URL, le filtrage de présentation, la garde de réservation, les deux crochets d'e-mail, le crochet de paiement — la signature réellement reçue, établie en lisant **à la fois** l'appel côté Vik et le traitement côté WordPress. Une ligne par crochet, forme attendue et forme reçue en regard, tout écart nommé.
+
+**Le risque couvert.** Un rappel qui se trompe de forme ne dégrade pas, il lève une erreur fatale. Sur la garde de réservation, cela casserait toute création de réservation des deux marques, comme le paiement vient de l'être.
 
 ### Réserve sur B9, à lever avant la production, pas avant la préproduction
 
@@ -257,7 +279,7 @@ Ouvert par B4b. Le défaut de `stripe.php:365` est celui de E4J et non un artefa
 ```
 fait ── A1 A2 A3 A4 ── B1 B2 B3 B4a B4 B4b B5 ── C1 C2 C3 C4 ── D1 D2 ── G1 ── NitroPack
 
-maintenant ─┬─ déploiement staging ─ recette ─ exclusion tests/ ─ B10 ─ D3 ─┐ le test
+maintenant ─┬─ B9d ─ redéploiement ─ recette 2 passes ─ exclusion tests/ ─ B10 ─ D3 ─┐ le test
             ├─ G2 ──── G3 ─────────────────┤   Code puis Thomas
             ├─ revue B5 ───────────────────┤   Cowork
             ├─ F1, F2, F3 ─────────────────┤   Thomas, urgent, hors chemin critique
@@ -299,6 +321,16 @@ maintenant ─┬─ déploiement staging ─ recette ─ exclusion tests/ ─ B
 ## 5. Prompts de lancement
 
 À coller tels quels dans Claude Code, depuis `~/Documents/icl-dev`. Les prompts des tâches déjà exécutées ne sont pas reproduits ici : ils vivent dans l'historique Git et dans les constats qu'ils ont produits. Les prompts de B4, B4b et B5 en sont sortis à la version 2.1.
+
+### B9d — signatures de crochets. Sonnet 5, effort faible
+
+> Lis `CLAUDE.md`, `docs/briefs/constat-correctif-signature-paiement.md` et `docs/briefs/constat-phase-0.md` §Q5. La phase 4 a été cassée par une signature de rappel supposée à partir du seul code de Vik, sans tenir compte de ce que WordPress fait des arguments avant de les livrer.
+>
+> Fais l'inventaire de **tous** les crochets auxquels `mu-plugins/lme-brands/` s'accroche, `add_action` comme `add_filter`. Pour chacun : le nom du crochet, le fichier et la ligne de l'appel côté Vik ou côté WordPress, la signature **réellement reçue** par notre rappel, et la signature que notre rappel déclare. Établis la forme reçue en lisant l'appel **et** son traitement par le cœur de WordPress, jamais l'un sans l'autre.
+>
+> **Nomme tout écart**, et dis pour chacun s'il produirait une erreur fatale ou une dégradation silencieuse. Ne corrige rien dans cette passe : la liste d'abord, les correctifs ensuite, sur décision.
+>
+> **Ne déploie rien, n'écris rien en base, ne lis aucune clé.** Écris `docs/briefs/constat-signatures-crochets.md`. Commit et poussée après revue.
 
 ### B9 — script de déploiement, de vérification et de retour arrière. Sonnet 5, effort moyen
 
@@ -372,6 +404,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.9 | 2026-09-22 | B9b et B9c livrés et revus. La phase 4 n'avait jamais fonctionné : `payment-brand.php` levait une erreur fatale sur toute tentative de paiement, les deux marques, les deux environnements, par une prémisse fausse de `constat-phase-0.md` §Q5 corrigée à sa source. Les deux correctifs d'hôte visent désormais l'hôte réel. Ajout de B9d, la vérification des signatures de crochets, avant B10. La 2.8, qui n'a pas survécu, affirmait à tort que les 120 tests validaient la forme fausse : ils ne couvraient pas cette fonction du tout. |
 | 2.7 | 2026-09-21 | Première recette menée sur `staging13`. La recette passe en deux passes, une par marque, la vérification n°4 n'étant pas vérifiable autrement. Ajout de B9b : la réécriture d'URL de la préproduction pointe vers la production, et une erreur fatale coupe la page de paiement. |
 | 2.6 | 2026-09-21 | La recette du moteur gagne un titre de section : ses huit vérifications existaient depuis la 2.2 mais sans en-tête, dans le corps du chantier B, et les renvois parlaient d'un « chapitre B8 » qui n'a jamais existé. Renvois corrigés. |
 | 2.5 | 2026-09-21 | B9 livré, revu et acté, avec une réserve : `tests/test-core.php` est suivi par Git donc déployé, et exécutable par HTTP ; exclusion `tests/` obligatoire avant B10. La parade de paiement est tranchée, C, D et E avec le critère de K, ce qui débloque B6 ; G est écartée et remplacée par le relâchement du verrou. Chapitre 4 remis à jour. |
