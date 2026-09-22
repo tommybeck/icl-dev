@@ -1,6 +1,6 @@
 # Statut — chantier réservation Sexcape Room et site sexcaperoom.ch
 
-**Version : 3.9 — 2026-09-22**
+**Version : 3.10 — 2026-09-22**
 
 Document de synthèse pour ce projet Communication. Il ne remplace aucun fichier existant, il les relie : le chantier réservation vit dans le dépôt `icl-dev` (Claude Code), la construction du site sexcaperoom.ch vit ici (Cowork, EMCP Tools), et les deux se rejoignent à un seul endroit précis, décrit plus bas.
 
@@ -37,6 +37,12 @@ Les onze fichiers de doctrine de ce projet datent tous du 4 septembre. Deux chan
 **Le script a rendu un échec sur un succès, et c'est le seul défaut de cette passe.** Sa vérification d'apparence appelle `https://staging13.linstantcle.ch/` sans suivre la redirection 301 que TranslatePress pose vers `/fr/`, lit un corps vide, et conclut à l'absence des jetons. Correctif et prompt dans `brief-correctif-verification-apparence.md`, avec l'exclusion `tests/` dans la même passe. **La leçon dépasse le correctif** : c'est le symétrique de la règle « aucun échec silencieux », un succès bruyamment nié, et toute vérification du script qui conclut d'une absence est à relire de la même façon.
 
 **B9b livré et revu le 22 septembre**, commit `cb46ba8`, deux constats. **Le correctif d'URL est porté et il est bon** : la réécriture vise désormais l'hôte réel de la requête, la marque résolue ne servant plus qu'à décider s'il faut réécrire. En production le geste devient un no-op, en préproduction il garde les liens sur la préproduction.
+
+**B9e livré et revu le 22 septembre**, commit `8327ba0`. Le garde-fou de messagerie corrige les quatre défauts du brief, applique les deux durcissements, et établit la liste des hôtes de production par preuve plutôt que par supposition. Il lit `$_SERVER['HTTP_HOST']` et non `home_url()`, donc il ne dépend plus de ce que `lme-brands` réécrit.
+
+**Une réserve bloquante.** Hors requête HTTP — WP-CLI, et le cron s'il est lancé en ligne de commande — l'hôte est absent, la production n'est pas reconnue, et l'envoi est **abandonné sans avertissement**. La victime désignée est le rappel avant séjour, tâche horaire de Vik. Selon la façon dont SiteGround déclenche le cron, les rappels de production partent ou disparaissent : à établir, pas à supposer. Le correctif est court : hôte absent, décider sur `wp_get_environment_type()` seul, et journaliser tout abandon d'envoi dans tous les cas.
+
+**Effet de bord à connaître.** `deployer-moteur.sh` construit sa liste avec `git ls-files` sous `mu-plugins/` : ce greffon partira au prochain déploiement sans décision séparée, donc la réserve ci-dessus atteindrait la production en même temps que le moteur.
 
 **B9d livré et revu le 22 septembre**, commit `4a34466`. Les treize crochets de `lme-brands` sont passés en revue, forme reçue établie par lecture croisée de l'appel et du traitement du cœur WordPress. **Aucun écart** hors celui déjà corrigé. La garde de réservation, dont un écart aurait cassé toute création de réservation des deux marques, reçoit bien ses cinq arguments dans l'ordre déclaré, sur les deux branches de `saveorder()`. Deux limites : la vérification porte sur la forme des arguments et non sur le type de retour attendu, que seule la recette couvre ; et c'est un instantané, donc **tout crochet ajouté ensuite repasse par là**, règle à porter dans le README du plugin.
 
@@ -259,3 +265,4 @@ Les conversations de ce chantier sont longues et coûteuses. **Elles se coupent 
 | 3.7 | 2026-09-22 | B9b revu. Correctif d'URL bon et porté. La fatale est établie : la phase 4 casse le paiement des deux marques sur les deux environnements, par une prémisse fausse du constat de phase 0 que les tests validaient. Ajout de B9c. Plan en 2.8. |
 | 3.8 | 2026-09-22 | B9c revu et validé : la phase 4 est corrigée et reste à recetter. Correction d'une affirmation fausse de ma part sur les tests, qui ne couvraient pas la fonction fautive. Ajout de B9d, les signatures de crochets, avant B10. Doublon de numéro 3.6 du journal résorbé. Plan en 2.9. |
 | 3.9 | 2026-09-22 | B9d revu et validé : treize crochets, aucun écart. Le script est corrigé, réserve `tests/` levée. Plus rien ne retient le redéploiement et la recette. Plan en 2.10. |
+| 3.10 | 2026-09-22 | B9e revu : garde-fou de messagerie bon dans l'ensemble, avec une réserve bloquante hors requête HTTP, où la production n'est pas reconnue et l'envoi est abandonné sans avertissement. Plan en 2.11. |
