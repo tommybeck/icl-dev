@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.12, 22 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.12 lève la réserve de B9e et pose l'interdiction du « Push to Live » de SiteGround. Plus rien ne retient le redéploiement et la recette.
+**Version 2.13, 23 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.13 remonte vingt-trois prérequis qui dormaient dans les briefs, dont huit bloquants.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -118,6 +118,16 @@ Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette r
 **Avertissement, avant tout essai de paiement en préproduction.** VikStripe y utilise les clés que porte la base copiée, c'est-à-dire **les clés de production**. Un test écrirait dans le Stripe réel, créerait des sessions parasites et fausserait la réconciliation que B6 doit construire. Basculer la préproduction sur les clés de test d'abord, geste de Thomas.
 
 **Adresse destinataire des essais : une adresse jetable suffit, et c'est décidé.** La recette vérifie les en-têtes et l'identité d'envoi, pas le contenu. D4 ne bloque donc pas la recette.
+
+### Les prérequis dormants, relevés le 23 septembre
+
+`prerequis-dormants-2026-09-23.md` remonte **vingt-trois prérequis** qui vivaient dans des briefs et des constats sans être portés ici, dont **huit bloquent une tâche nommée**. Ceux qui touchent une tâche lançable sont entrés dans les tableaux ci-dessus : la page 6586 pour G2, le nouveau G2b, et la recette en six points pour G3. Les autres sont dans le relevé, avec leur source et leur destinataire.
+
+**Trois à traiter avant la prochaine recette.** La commande de test **1822**, toujours en `standby`, verrouille la chambre 4 sur la préproduction. L'exemplaire de `tests/test-core.php` **déjà déployé** n'a pas été retiré : l'exclusion ne vaut que pour les déploiements futurs, `rsync` étant additif. Et `revue-constat-vikstripe-b4b.md`, que ce plan cite trois fois, **n'est pas dans le dépôt**, ce qui rend H1 lançable sur le papier seulement.
+
+**Deux trous dans la recette elle-même.** La vérification n°6 ignore `cancel_url` et les réservations à marques mêlées, qui sont **les deux seuls chemins où la métadonnée de marque peut être fausse** (`constat-phase-4-paiement.md`). Et la vérification n°4 est câblée pour la passe Sexcape Room : le script sortira en erreur pendant la passe L'Instant Clé, limite du script et non défaut du moteur (`constat-recette-moteur.md`).
+
+**La règle qui en sort, et elle vaut pour Code comme pour Cowork.** Un brief ou un constat qui pose un prérequis le **remonte au plan dans la même passe**. Le plan est la seule chose qu'on rouvre à chaque session : ce qui n'y est pas ne sera pas fait. Vingt-trois points viennent de le démontrer d'un coup.
 
 ### La recette du moteur — les huit vérifications
 
@@ -286,12 +296,15 @@ Le brief `brief-verrou-hote-reservation.md` décrit ce chantier depuis le 12 sep
 |---|---|---|---|
 | G1 | Résorber la divergence du brief entre le dossier Communication et le dépôt | Thomas | **fait le 19 septembre** |
 | G0 | Deux gestes de Thomas avant G2 : exclure `reservation.sexcaperoom.ch` du cache dynamique SiteGround **et** de NitroPack ; et confirmer que la redirection reste un 302 jusqu'à la fin de la recette | Thomas | **ouvert**, et personne ne le portait jusqu'ici |
-| G2 | Implémenter la liste blanche et la redirection conditionnées à l'hôte | Code, Sonnet 5, moyen | **lançable** |
-| G3 | Déployer G2 dans la même fenêtre que le moteur | Code puis Thomas | attend G2 et B8 |
+| G2 | Implémenter la liste blanche et la redirection conditionnées à l'hôte | Code, Sonnet 5, moyen | **lançable après G0**. La liste tranchée ignore la page **6586**, fiche de L'Indécent |
+| G2b | Produire le fragment `.htaccess` : `X-Robots-Tag` conditionné à l'hôte, et `robots.txt` propre à cet hôte | Code, Sonnet 5, faible | **nouveau**, le plan n'en portait aucune trace |
+| G3 | Déployer G2 et G2b dans la même fenêtre que le moteur, et mener la **recette en six points** du verrou | Code puis Thomas | attend G2, G2b et B8 |
 
 Pourquoi G0 existe. Sans l'exclusion de cache, une réponse mise en cache pour un hôte est servie pour l'autre, et un verrou PHP est sans effet sur une réponse qui ne passe pas par PHP. Et une 301 posée une heure de trop survit dans le navigateur du visiteur : ni une purge ni un correctif ne la rattrapent. C'est le seul geste du chantier dont l'erreur survit à sa correction.
 
 **Vérification d'entrée de G2, conservée.** Le brief du dépôt doit contenir la décision du 302 pendant la recette et le filtre par `get_queried_object_id()`. S'il ne les porte pas, c'est l'ancienne copie et il faut s'arrêter.
+
+**G3 porte aussi la recette en six points du verrou**, décrite dans `brief-verrou-hote-reservation.md` et jusqu'ici portée nulle part : la vérification n°8 de la recette du moteur n'en reprend qu'un, et elle se rejoue après purge des deux caches, sur Safari et sur iPhone. C'est elle qui conditionne le passage du 302 au 301.
 
 **Motif de G3 :** tant que la liste blanche n'est pas en service, l'hôte de réservation sert tout le site L'Instant Clé, en `index, follow`. C'est une fuite de marque en production aujourd'hui, pas un risque futur.
 
@@ -432,6 +445,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.13 | 2026-09-23 | Vingt-trois prérequis dormants remontés des briefs, dont huit bloquants : `prerequis-dormants-2026-09-23.md`. Ajout de G2b, le fragment `.htaccess`, dont le plan ne portait aucune trace. G2 signale la page 6586 absente de la liste tranchée, G3 reprend la recette en six points du verrou. Deux trous nommés dans la recette. Règle posée : un prérequis se remonte au plan dans la même passe. |
 | 2.12 | 2026-09-22 | Réserve de B9e levée : hors requête HTTP, `wp_get_environment_type()` décide seul, et il est établi que le rappel de Vik passe aujourd'hui par la boucle HTTP de WP-Cron, donc aucun rappel n'avait disparu. Interdiction du « Push to Live » de SiteGround posée, qui emporterait l'environnement et l'adresse fourre-tout en production. Correction d'une seconde affirmation non vérifiée de Cowork. |
 | 2.11 | 2026-09-22 | B9e livré et revu : quatre défauts corrigés, deux durcissements en place, liste d'hôtes établie par preuve. **Une réserve bloquante** : hors requête HTTP, WP-CLI et cron en ligne de commande, la production n'est pas reconnue et l'envoi est abandonné sans avertissement, le rappel avant séjour en tête. Effet de bord noté : la liste dynamique du script emporte ce greffon au prochain déploiement, sans décision séparée. |
 | 2.10 | 2026-09-22 | B9d livré et revu : treize crochets, aucun écart hors celui déjà corrigé, et la règle passe au README pour survivre à la mémoire. Le script est corrigé, redirection TranslatePress suivie et motif `tests/` exclu, ce qui lève la réserve sur B9. Plus rien ne retient le redéploiement et la recette. |
