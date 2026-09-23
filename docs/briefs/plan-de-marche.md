@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.11, 22 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.11 acte B9e, avec une réserve bloquante : hors requête HTTP, le garde-fou avale les e-mails de production au lieu de les laisser passer.
+**Version 2.12, 22 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.12 lève la réserve de B9e et pose l'interdiction du « Push to Live » de SiteGround. Plus rien ne retient le redéploiement et la recette.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -86,8 +86,8 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B9b | Réécriture d'URL en préproduction, et constat de l'erreur fatale | Sonnet 5, moyen | **fait** le 22 septembre, commit `cb46ba8`, deux constats, revue faite |
 | B9c | Corriger `payment-brand.php`, et la prémisse fausse qui l'a produit | Sonnet 5, moyen | **fait** le 22 septembre, commit `f7a740a`, `constat-correctif-signature-paiement.md`, revue faite |
 | B9d | Vérifier la signature réelle de chaque crochet auquel `lme-brands` s'accroche | Sonnet 5, faible | **fait** le 22 septembre, commit `4a34466`, `constat-signatures-crochets.md`, revue faite. Treize crochets, **aucun écart** hors celui déjà corrigé |
-| B9e | Garde-fou de redirection des e-mails hors production | Sonnet 5, faible | **livré** le 22 septembre, commit `8327ba0`, `constat-mail-guard.md`. **Une réserve bloquante**, ci-dessous |
-| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Deux prérequis : la réserve de B9e, et la recette en deux passes** |
+| B9e | Garde-fou de redirection des e-mails hors production | Sonnet 5, faible | **fait** le 22 septembre, commits `8327ba0` et `d9a123e`, `constat-mail-guard.md`, revue faite. Réserve levée |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis restants : la recette en deux passes, G0 et G3** |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
@@ -156,7 +156,19 @@ Les deux vont à **B9b**, brief `brief-correctif-levier-et-fatal-paiement.md`.
 
 **Ce qui reste.** La phase 4 est corrigée, elle n'est pas recettée : elle n'a jamais tourné une seule fois de bout en bout. La vérification n°6 sera la première à la mettre à l'épreuve.
 
-### B9e — le garde-fou est bon, sauf hors requête HTTP
+### B9e — le garde-fou est bon, et sa réserve est levée
+
+**Livré le 22 septembre, `constat-mail-guard.md`.** Les quatre défauts du brief sont corrigés, les deux durcissements sont en place, et la liste des hôtes de production est établie par preuve, inodes à l'appui, plutôt que devinée. Le greffon lit `$_SERVER['HTTP_HOST']` et non `home_url()`, donc il ne dépend plus de ce que `lme-brands` réécrit. Il ne touche ni `From`, ni `Sender`, ni `Reply-To`, et la vérification n°5 de la recette reste valable.
+
+**La réserve, levée le jour même par `d9a123e`.** Hors requête HTTP — WP-CLI, ou un cron en ligne de commande — il n'y a pas d'hôte à comparer, et exiger quand même une correspondance revenait à ne jamais reconnaître la production dans ce contexte. `wp_get_environment_type()` y décide désormais seul : la préproduction, où il vaut `staging`, continue de tout détourner ; la production cesse d'avaler ses propres envois. Le test qui figeait l'ancien comportement a été corrigé plutôt que supprimé.
+
+**Et un fait rassurant, établi plutôt que supposé** : le rappel avant séjour de Vik passe aujourd'hui par la boucle HTTP de WP-Cron, qui porte un `HTTP_HOST`. **Aucun rappel de production n'aurait disparu.** La réserve restait réelle pour autant, SiteGround pouvant basculer sur un vrai cron en ligne de commande sans que le dépôt n'en sache rien.
+
+**Une erreur de Cowork, pour mémoire.** La revue demandait aussi de journaliser tout abandon d'envoi. C'était déjà fait, inconditionnellement, par `catchall_not_configured` dans `guard.php` : la demande venait d'une lecture du seul chemin d'avertissement de marque, sans aller voir le chemin d'abandon. Deuxième fois en deux jours qu'une affirmation part sans vérification.
+
+**Le « Push to Live » de SiteGround est interdit.** Le garde-fou décide d'après `WP_ENVIRONMENT_TYPE` : un déploiement de la préproduction vers la production par l'outil natif y ferait remonter la valeur `staging`, et tous les e-mails clients partiraient vers l'adresse fourre-tout. Le déploiement passe par `deployer-moteur.sh`, jamais par Site Tools. **L'adresse fourre-tout elle-même vit aussi en production**, où elle est inerte : elle s'hérite ainsi de chaque copie de préproduction, et le jour où la détection se tromperait, le courrier client atterrit dans une boîte relevée plutôt que d'être abandonné.
+
+**Un effet de bord à connaître.** `deployer-moteur.sh` construit sa liste avec `git ls-files` sous `mu-plugins/` : ce greffon **partira au prochain déploiement**, sans décision séparée. C'est le revers de la liste dynamique qu'on a saluée en B9, et c'est voulu — en production, il est inerte.
 
 **Livré le 22 septembre, `constat-mail-guard.md`.** Les quatre défauts du brief sont corrigés, les deux durcissements sont en place, et la liste des hôtes de production est établie par preuve, inodes à l'appui, plutôt que devinée. Le greffon lit `$_SERVER['HTTP_HOST']` et non `home_url()`, donc il ne dépend plus de ce que `lme-brands` réécrit. Il ne touche ni `From`, ni `Sender`, ni `Reply-To`, et la vérification n°5 de la recette reste valable.
 
@@ -273,8 +285,11 @@ Le brief `brief-verrou-hote-reservation.md` décrit ce chantier depuis le 12 sep
 | # | Quoi | Qui | État |
 |---|---|---|---|
 | G1 | Résorber la divergence du brief entre le dossier Communication et le dépôt | Thomas | **fait le 19 septembre** |
+| G0 | Deux gestes de Thomas avant G2 : exclure `reservation.sexcaperoom.ch` du cache dynamique SiteGround **et** de NitroPack ; et confirmer que la redirection reste un 302 jusqu'à la fin de la recette | Thomas | **ouvert**, et personne ne le portait jusqu'ici |
 | G2 | Implémenter la liste blanche et la redirection conditionnées à l'hôte | Code, Sonnet 5, moyen | **lançable** |
 | G3 | Déployer G2 dans la même fenêtre que le moteur | Code puis Thomas | attend G2 et B8 |
+
+Pourquoi G0 existe. Sans l'exclusion de cache, une réponse mise en cache pour un hôte est servie pour l'autre, et un verrou PHP est sans effet sur une réponse qui ne passe pas par PHP. Et une 301 posée une heure de trop survit dans le navigateur du visiteur : ni une purge ni un correctif ne la rattrapent. C'est le seul geste du chantier dont l'erreur survit à sa correction.
 
 **Vérification d'entrée de G2, conservée.** Le brief du dépôt doit contenir la décision du 302 pendant la recette et le filtre par `get_queried_object_id()`. S'il ne les porte pas, c'est l'ancienne copie et il faut s'arrêter.
 
@@ -321,10 +336,10 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 
 ## 4. Ce qui revient à Thomas, par ordre
 
-**Faits le 19 septembre**, retirés de cette liste : la sortie de la page 845 et des URL à `sid` de NitroPack, et G1.
+**Faits le 19 septembre**, retirés de cette liste : la sortie de la page 845 et des URL à `sid` de NitroPack, qui ne dispense pas de l'exclusion de l'hôte de réservation, G0, et G1.
 
 1. **Recréer la préproduction depuis la production. Fait le 20 septembre**, sous `staging13`. À refaire dès qu'elle aura dérivé : une recette menée sur une copie périmée ne prouve rien de la production.
-2. **Après chaque recréation**, trois gestes qui ne survivent pas à la copie, dans cet ordre : vérifier que `WP_ENVIRONMENT_TYPE` vaut bien `staging` ; **basculer VikStripe sur les clés de test**, la copie ramenant les clés de production avec la base ; reposer la ligne `LME_BRANDS_HOST_OVERRIDE` du chapitre 5 du constat.
+2. **Après chaque recréation**, deux gestes qui ne survivent pas à la copie, dans cet ordre : vérifier que `WP_ENVIRONMENT_TYPE` vaut bien `staging` ; **basculer VikStripe sur les clés de test**, la copie ramenant les clés de production avec la base.
 3. **Lancer `deployer-moteur.sh` sur la préproduction**, d'abord sans `--appliquer` pour lire ce qu'il changerait, puis avec.
 4. **Mener la recette**, les huit vérifications du chantier B.
 5. **Poser dans `wp-config.php` la clé Stripe restreinte en lecture et le secret de signature du webhook**, avant le déploiement de B6. La parade est tranchée depuis le 21 septembre, voir le chantier B ; ces deux valeurs sont la seule chose qu'elle attend de toi.
@@ -417,6 +432,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.12 | 2026-09-22 | Réserve de B9e levée : hors requête HTTP, `wp_get_environment_type()` décide seul, et il est établi que le rappel de Vik passe aujourd'hui par la boucle HTTP de WP-Cron, donc aucun rappel n'avait disparu. Interdiction du « Push to Live » de SiteGround posée, qui emporterait l'environnement et l'adresse fourre-tout en production. Correction d'une seconde affirmation non vérifiée de Cowork. |
 | 2.11 | 2026-09-22 | B9e livré et revu : quatre défauts corrigés, deux durcissements en place, liste d'hôtes établie par preuve. **Une réserve bloquante** : hors requête HTTP, WP-CLI et cron en ligne de commande, la production n'est pas reconnue et l'envoi est abandonné sans avertissement, le rappel avant séjour en tête. Effet de bord noté : la liste dynamique du script emporte ce greffon au prochain déploiement, sans décision séparée. |
 | 2.10 | 2026-09-22 | B9d livré et revu : treize crochets, aucun écart hors celui déjà corrigé, et la règle passe au README pour survivre à la mémoire. Le script est corrigé, redirection TranslatePress suivie et motif `tests/` exclu, ce qui lève la réserve sur B9. Plus rien ne retient le redéploiement et la recette. |
 | 2.9 | 2026-09-22 | B9b et B9c livrés et revus. La phase 4 n'avait jamais fonctionné : `payment-brand.php` levait une erreur fatale sur toute tentative de paiement, les deux marques, les deux environnements, par une prémisse fausse de `constat-phase-0.md` §Q5 corrigée à sa source. Les deux correctifs d'hôte visent désormais l'hôte réel. Ajout de B9d, la vérification des signatures de crochets, avant B10. La 2.8, qui n'a pas survécu, affirmait à tort que les 120 tests validaient la forme fausse : ils ne couvraient pas cette fonction du tout. |
