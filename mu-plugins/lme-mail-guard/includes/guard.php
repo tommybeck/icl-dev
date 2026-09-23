@@ -121,6 +121,63 @@ function lme_mail_guard_maybe_warn_brand_host( $to ) {
 }
 
 /**
+ * Chemin du journal de transcription d'enveloppe, chapitre 2 du brief
+ * docs/briefs/brief-recette-automatisee.md. Un fichier dédié, distinct de
+ * debug.log : ce qu'il porte (l'adresse réelle du destinataire d'origine)
+ * est une donnée personnelle qui doit pouvoir être identifiée et purgée
+ * d'un seul geste avec la préproduction, jamais mélangée aux lignes
+ * d'avertissement ordinaires de lme_mail_guard_log().
+ *
+ * @return string
+ */
+function lme_mail_guard_envelope_log_path() {
+	return WP_CONTENT_DIR . '/lme-mail-guard-envelopes.log';
+}
+
+/**
+ * Écrit une ligne de transcription d'enveloppe si, et seulement si,
+ * `$should_redirect` vaut true — la même valeur, calculée une seule fois par
+ * lme_mail_guard_filter_wp_mail() et partagée avec la décision de
+ * détournement, jamais un second test qui pourrait diverger d'elle
+ * (chapitre 2 du brief). Une transcription ne s'active donc jamais quand le
+ * contexte est reconnu comme production, exactement comme le détournement.
+ *
+ * Ne lit que `to`, `headers` et `subject` de $args : le corps et les pièces
+ * jointes ne sont jamais transmis à lme_mail_guard_format_envelope_line(),
+ * qui ne les accepte de toute façon pas en paramètre.
+ *
+ * @param array $args            Voir la docblock de wp_mail(), valeurs
+ *                                d'origine, avant toute réécriture.
+ * @param bool  $should_redirect Décision déjà prise par l'appelant.
+ */
+function lme_mail_guard_maybe_transcribe_envelope( array $args, $should_redirect ) {
+	if ( ! $should_redirect ) {
+		return;
+	}
+
+	$line = lme_mail_guard_format_envelope_line(
+		gmdate( 'c' ),
+		$args['to'],
+		lme_mail_guard_normalize_headers( isset( $args['headers'] ) ? $args['headers'] : '' ),
+		isset( $args['subject'] ) ? $args['subject'] : '',
+		lme_mail_guard_current_host()
+	);
+
+	$written = @error_log( $line . "\n", 3, lme_mail_guard_envelope_log_path() );
+
+	if ( ! $written ) {
+		lme_mail_guard_log(
+			'error',
+			'envelope_transcript_write_failed',
+			sprintf(
+				"Écriture de la transcription d'enveloppe impossible dans %s : les vérifications 5 et 7 de la recette resteraient aveugles tant que ce n'est pas corrigé.",
+				lme_mail_guard_envelope_log_path()
+			)
+		);
+	}
+}
+
+/**
  * Réécrit `to` et `headers` quand l'e-mail doit être détourné et qu'une
  * adresse fourre-tout est configurée. Ne touche à rien d'autre : ni
  * `subject`, ni `message`, ni `attachments`, ni `embeds`, ni — chapitre
@@ -131,7 +188,11 @@ function lme_mail_guard_maybe_warn_brand_host( $to ) {
  * @return array
  */
 function lme_mail_guard_filter_wp_mail( $args ) {
-	if ( ! lme_mail_guard_current_should_redirect() ) {
+	$should_redirect = lme_mail_guard_current_should_redirect();
+
+	lme_mail_guard_maybe_transcribe_envelope( $args, $should_redirect );
+
+	if ( ! $should_redirect ) {
 		return $args;
 	}
 

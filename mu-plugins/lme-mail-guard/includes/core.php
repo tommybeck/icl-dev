@@ -308,6 +308,92 @@ function lme_mail_guard_build_redirected_headers( $original_headers, $original_t
 }
 
 /**
+ * Cherche la valeur d'un en-tête par son nom (la partie avant le premier
+ * deux-points, comparée en entier, insensible à la casse — même règle que
+ * lme_mail_guard_strip_cc_bcc()), dans un tableau déjà normalisé
+ * (lme_mail_guard_normalize_headers()). Rend la première occurrence.
+ *
+ * Sert à la transcription d'enveloppe (chapitre 2 du brief
+ * docs/briefs/brief-recette-automatisee.md) pour lire From, Sender et
+ * Reply-To sans dupliquer la logique de nommage d'en-tête déjà écrite pour
+ * Cc/Bcc.
+ *
+ * @param string[] $header_lines
+ * @param string   $name
+ * @return string|null null si l'en-tête n'apparaît pas, jamais une chaîne
+ *                      vide qui se confondrait avec un en-tête présent mais
+ *                      vide.
+ */
+function lme_mail_guard_find_header_value( array $header_lines, $name ) {
+	$wanted = strtolower( $name );
+
+	foreach ( $header_lines as $line ) {
+		if ( ! is_string( $line ) || false === strpos( $line, ':' ) ) {
+			continue;
+		}
+
+		list( $line_name, $line_value ) = explode( ':', $line, 2 );
+
+		if ( strtolower( trim( $line_name ) ) === $wanted ) {
+			return trim( $line_value );
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Aplatit un champ de la transcription d'enveloppe sur une seule ligne : un
+ * objet ou une valeur d'en-tête injectée avec un retour à la ligne ne doit
+ * jamais faire déborder l'enregistrement JSON sur plusieurs lignes du
+ * journal.
+ *
+ * @param mixed $value
+ * @return string
+ */
+function lme_mail_guard_envelope_sanitize_field( $value ) {
+	$value = str_replace( array( "\r", "\n" ), ' ', (string) $value );
+
+	return trim( $value );
+}
+
+/**
+ * Une ligne de la transcription d'enveloppe, chapitre 2 du brief
+ * docs/briefs/brief-recette-automatisee.md : To d'origine, From, Sender,
+ * Reply-To, objet et hôte — jamais le corps ni les pièces jointes, qui ne
+ * sont même pas des paramètres de cette fonction, pour qu'aucun appelant ne
+ * puisse les y glisser par erreur.
+ *
+ * Une ligne JSON, pas le format "PREFIX [NIVEAU] [code] message" de
+ * lme_mail_guard_log() : ce journal est lu par un script (recetter-moteur.sh,
+ * vérifications 5 et 7), pas par un humain qui grep un message d'erreur, et
+ * JSON évite d'avoir à écrire un second analyseur pour une forme ad hoc.
+ * JSON_UNESCAPED_UNICODE et JSON_UNESCAPED_SLASHES : le journal reste lisible
+ * tel quel par un `cat`/`tail` en SSH, sans échapper les caractères
+ * accentués.
+ *
+ * @param string   $timestamp        Horodatage déjà formaté par l'appelant (ex. gmdate('c')).
+ * @param mixed    $original_to      Valeur brute de $args['to'] avant tout détournement.
+ * @param string[] $original_headers En-têtes déjà normalisées (lme_mail_guard_normalize_headers()), avant tout détournement.
+ * @param mixed    $subject          Valeur brute de $args['subject'].
+ * @param string|null $host          Hôte HTTP courant, ou null hors requête HTTP.
+ * @return string
+ */
+function lme_mail_guard_format_envelope_line( $timestamp, $original_to, array $original_headers, $subject, $host ) {
+	$fields = array(
+		'ts'       => lme_mail_guard_envelope_sanitize_field( $timestamp ),
+		'to'       => lme_mail_guard_envelope_sanitize_field( lme_mail_guard_format_original_to( $original_to ) ),
+		'from'     => lme_mail_guard_envelope_sanitize_field( lme_mail_guard_find_header_value( $original_headers, 'From' ) ),
+		'sender'   => lme_mail_guard_envelope_sanitize_field( lme_mail_guard_find_header_value( $original_headers, 'Sender' ) ),
+		'reply_to' => lme_mail_guard_envelope_sanitize_field( lme_mail_guard_find_header_value( $original_headers, 'Reply-To' ) ),
+		'subject'  => lme_mail_guard_envelope_sanitize_field( $subject ),
+		'host'     => lme_mail_guard_envelope_sanitize_field( $host ),
+	);
+
+	return json_encode( $fields, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+}
+
+/**
  * Résout l'adresse fourre-tout depuis la constante wp-config.php
  * `LME_MAIL_GUARD_CATCHALL_EMAIL`, avec repli inerte : non définie, ou
  * définie à une chaîne vide ou blanche, rend null. C'est à l'appelant de

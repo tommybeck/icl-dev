@@ -24,6 +24,17 @@
  * From/Sender/Reply-To. N'ajoute jamais de réécriture d'expéditeur ici :
  * ce serait un changement de portée qui casserait cette recette.
  *
+ * Transcription d'enveloppe (chapitre 2 de docs/briefs/brief-recette-automatisee.md) :
+ * chaque fois — et seulement chaque fois — qu'un message est détourné (même
+ * décision que ci-dessus, jamais un second test), ce greffon consigne To
+ * d'origine, From, Sender, Reply-To, objet et hôte dans
+ * wp-content/lme-mail-guard-envelopes.log, un fichier dédié et lisible par
+ * SSH — jamais le corps, jamais une pièce jointe. Sert aux vérifications 5
+ * et 7 de la recette automatisée : lire un en-tête sans jamais ouvrir la
+ * boîte fourre-tout. Ce fichier porte une donnée personnelle (l'adresse
+ * réelle du destinataire) : à purger avec la préproduction, jamais à faire
+ * sortir du serveur.
+ *
  * Réglages, posés par Thomas dans wp-config.php, jamais dans ce dépôt :
  *   - LME_MAIL_GUARD_CATCHALL_EMAIL  l'adresse fourre-tout. Non définie
  *                                    (ou vide) hors production : l'envoi

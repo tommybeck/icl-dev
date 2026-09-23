@@ -280,6 +280,112 @@ lme_mail_guard_test_assert_same(
 	'espaces superflus retirés'
 );
 
+echo "== lme_mail_guard_find_header_value() ==\n";
+
+lme_mail_guard_test_assert_same(
+	'Réservations <reservations@linstantcle.ch>',
+	lme_mail_guard_find_header_value( array( 'From: Réservations <reservations@linstantcle.ch>', 'Reply-To: a@example.ch' ), 'From' ),
+	'trouve From, insensible à la casse du nom recherché implicitement (ici déjà exact)'
+);
+lme_mail_guard_test_assert_same(
+	'a@example.ch',
+	lme_mail_guard_find_header_value( array( 'reply-to: a@example.ch' ), 'Reply-To' ),
+	'insensible à la casse du nom dans la ligne'
+);
+lme_mail_guard_test_assert_same(
+	null,
+	lme_mail_guard_find_header_value( array( 'From: a@example.ch' ), 'Sender' ),
+	"en-tête absent = null, jamais une chaîne vide qui se confondrait avec un en-tête présent mais vide"
+);
+lme_mail_guard_test_assert_same(
+	null,
+	lme_mail_guard_find_header_value( array( 'boundary=XYZ' ), 'From' ),
+	'ligne sans deux-points ignorée, jamais interprétée comme un en-tête'
+);
+lme_mail_guard_test_assert_same(
+	'premier@example.ch',
+	lme_mail_guard_find_header_value( array( 'From: premier@example.ch', 'From: second@example.ch' ), 'From' ),
+	'première occurrence retenue en cas de doublon'
+);
+lme_mail_guard_test_assert_same(
+	'a@example.ch',
+	lme_mail_guard_find_header_value( array( 'X-Debug: from: ceci n’est pas un en-tête From', 'From: a@example.ch' ), 'From' ),
+	"une valeur d'en-tête qui contient littéralement 'from:' n'est pas confondue avec le nom de l'en-tête — même garde que lme_mail_guard_strip_cc_bcc()"
+);
+
+echo "== lme_mail_guard_format_envelope_line() : transcription d'enveloppe, chapitre 2 du brief ==\n";
+
+$envelope_headers = lme_mail_guard_normalize_headers(
+	"From: L'Instant Clé <reservations@linstantcle.ch>\r\nSender: reservations@linstantcle.ch\r\nReply-To: reservations@linstantcle.ch\r\nBcc: espion@example.ch"
+);
+
+$line = lme_mail_guard_format_envelope_line(
+	'2026-09-23T10:00:00+00:00',
+	'client@example.ch',
+	$envelope_headers,
+	'Votre réservation',
+	'staging13.linstantcle.ch'
+);
+$decoded = json_decode( $line, true );
+
+lme_mail_guard_test_assert( is_string( $line ) && '' !== $line, 'produit une chaîne non vide' );
+lme_mail_guard_test_assert( is_array( $decoded ), 'la ligne est un JSON valide (une ligne, un enregistrement)' );
+lme_mail_guard_test_assert_same( '2026-09-23T10:00:00+00:00', $decoded['ts'], 'horodatage transmis tel quel' );
+lme_mail_guard_test_assert_same( 'client@example.ch', $decoded['to'], "To d'origine (avant tout détournement)" );
+lme_mail_guard_test_assert_same( "L'Instant Clé <reservations@linstantcle.ch>", $decoded['from'], 'From lu dans les en-têtes' );
+lme_mail_guard_test_assert_same( 'reservations@linstantcle.ch', $decoded['sender'], 'Sender lu dans les en-têtes' );
+lme_mail_guard_test_assert_same( 'reservations@linstantcle.ch', $decoded['reply_to'], 'Reply-To lu dans les en-têtes' );
+lme_mail_guard_test_assert_same( 'Votre réservation', $decoded['subject'], 'objet transmis tel quel' );
+lme_mail_guard_test_assert_same( 'staging13.linstantcle.ch', $decoded['host'], 'hôte transmis tel quel' );
+lme_mail_guard_test_assert(
+	false === strpos( $line, 'espion@example.ch' ),
+	"le Bcc d'origine n'apparaît nulle part : cette fonction ne reçoit même pas de quoi le transcrire"
+);
+
+$line_no_from = lme_mail_guard_format_envelope_line( '2026-09-23T10:00:00+00:00', 'client@example.ch', array(), '', null );
+$decoded_no_from = json_decode( $line_no_from, true );
+lme_mail_guard_test_assert_same( '', $decoded_no_from['from'], "From absent = chaîne vide dans la transcription, pas d'erreur" );
+lme_mail_guard_test_assert_same( '', $decoded_no_from['host'], 'hôte absent (CLI, cron) = chaîne vide, pas une erreur' );
+
+$line_injection = lme_mail_guard_format_envelope_line(
+	'2026-09-23T10:00:00+00:00',
+	'client@example.ch',
+	array(),
+	"Sujet\nCc: injection@example.ch",
+	'staging13.linstantcle.ch'
+);
+lme_mail_guard_test_assert(
+	0 === substr_count( $line_injection, "\n" ),
+	"un retour à la ligne injecté dans l'objet ne fait jamais déborder la ligne du journal sur deux lignes"
+);
+
+echo "== la transcription d'enveloppe s'active exactement quand le détournement s'active — pas un second test ==\n";
+echo "   (lme_mail_guard_maybe_transcribe_envelope() de includes/guard.php reçoit la même valeur\n";
+echo "   \$should_redirect que le détournement, calculée une seule fois par lme_mail_guard_filter_wp_mail() ;\n";
+echo "   les cas ci-dessous sont donc déjà couverts par la suite lme_mail_guard_should_redirect() plus haut,\n";
+echo "   répétés ici nommément pour qu'ils survivent même si cette suite est un jour réorganisée.)\n";
+
+lme_mail_guard_test_assert_same(
+	true,
+	lme_mail_guard_should_redirect( 'staging', 'staging13.linstantcle.ch', $prod_hosts, false ),
+	"préproduction : le détournement s'active, donc la transcription aussi"
+);
+lme_mail_guard_test_assert_same(
+	false,
+	lme_mail_guard_should_redirect( 'production', 'linstantcle.ch', $prod_hosts, false ),
+	"production stricte : ni détournement ni transcription"
+);
+lme_mail_guard_test_assert_same(
+	false,
+	lme_mail_guard_should_redirect( 'production', null, $prod_hosts, false ),
+	"production, hôte absent (WP-CLI, cron en ligne de commande) : ni détournement ni transcription, cohérent avec le rappel de production qui ne doit pas être avalé (plan-de-marche.md §B9e)"
+);
+lme_mail_guard_test_assert_same(
+	true,
+	lme_mail_guard_should_redirect( 'production', 'linstantcle.ch', $prod_hosts, true ),
+	'FORCE_EMAIL_REDIRECT=true : détournement et transcription actifs même sur un hôte de production (cas du clone qui garde le domaine)'
+);
+
 echo "\n{$GLOBALS['lme_mail_guard_test_count']} tests, {$GLOBALS['lme_mail_guard_test_failures']} échec(s).\n";
 
 exit( $GLOBALS['lme_mail_guard_test_failures'] > 0 ? 1 : 0 );
