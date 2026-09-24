@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.13, 23 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.13 remonte vingt-trois prérequis qui dormaient dans les briefs, dont huit bloquants.
+**Version 2.14, 24 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.14 acte la recette automatisée, ouvre B11 sur un défaut réel de `room-filter.php`, et pose le réglage Vik qui bloque les vérifications d'e-mail.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -87,7 +87,10 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B9c | Corriger `payment-brand.php`, et la prémisse fausse qui l'a produit | Sonnet 5, moyen | **fait** le 22 septembre, commit `f7a740a`, `constat-correctif-signature-paiement.md`, revue faite |
 | B9d | Vérifier la signature réelle de chaque crochet auquel `lme-brands` s'accroche | Sonnet 5, faible | **fait** le 22 septembre, commit `4a34466`, `constat-signatures-crochets.md`, revue faite. Treize crochets, **aucun écart** hors celui déjà corrigé |
 | B9e | Garde-fou de redirection des e-mails hors production | Sonnet 5, faible | **fait** le 22 septembre, commits `8327ba0` et `d9a123e`, `constat-mail-guard.md`, revue faite. Réserve levée |
-| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis restants : la recette en deux passes, G0 et G3** |
+| B9f | Recette automatisée : transcription d'enveloppe et `recetter-moteur.sh` | Sonnet 5, moyen | **fait** le 23 septembre, commit `42cc5b1`, `constat-recette-automatisee.md`, revue faite |
+| B11 | Corriger `room-filter.php` : la fiche d'une chambre étrangère est rendue malgré le retrait du paramètre | Sonnet 5, moyen | **nouveau**, trouvé par la recette automatisée |
+| B9g | Faire relever par `recetter-moteur.sh` le lien Stripe Checkout sur la page du bouton PAY NOW, puis rendre la main au navigateur | Sonnet 5, faible | **nouveau**, débloque les vérifications 5 à 7 |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis restants : B11, B9g, les vérifications 5 à 7, G0 et G3** |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
@@ -118,6 +121,22 @@ Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette r
 **Avertissement, avant tout essai de paiement en préproduction.** VikStripe y utilise les clés que porte la base copiée, c'est-à-dire **les clés de production**. Un test écrirait dans le Stripe réel, créerait des sessions parasites et fausserait la réconciliation que B6 doit construire. Basculer la préproduction sur les clés de test d'abord, geste de Thomas.
 
 **Adresse destinataire des essais : une adresse jetable suffit, et c'est décidé.** La recette vérifie les en-têtes et l'identité d'envoi, pas le contenu. D4 ne bloque donc pas la recette.
+
+### Ce que la recette automatisée a trouvé — 23 septembre
+
+`constat-recette-automatisee.md`, commit `42cc5b1`. Le script existe, il tourne, et il a rendu plus que ce qu'on lui demandait.
+
+**La garde de réservation fonctionne, et c'est la seule garantie qui compte.** Vérification 3a nette et reproductible dans les deux sens : une tentative de réserver la chambre étrangère active est refusée par un `403` portant le titre de `lme_brands_reject_booking_attempt()`, jamais un refus natif de Vik.
+
+**Un défaut réel de présentation, tâche B11.** Sous le levier Sexcape Room, la vue `roomdetails` rend **intégralement la fiche de L'Aparté**, et l'inverse sous l'autre levier. Reproduit sur cinq requêtes consécutives, avec un paramètre anti-cache différent à chaque fois, donc ce n'est pas du cache. `room-filter.php` **s'exécute pourtant** : `debug.log` porte `foreign_room_param_stripped` avec le bon identifiant. La chaîne de références de `JInput` a été relue jusqu'à la source et **devrait** refléter l'`unset()`. Code s'arrête là plutôt que de deviner la cause, et il a raison : c'est deux fois que ce dépôt paie une hypothèse non vérifiée. **Portée : un visiteur curieux voit une fiche qu'il ne devrait pas voir, il ne peut pas la réserver.**
+
+**Le blocage des vérifications 5, 6 et 7 tient au script, pas à un réglage. Correction du 24 septembre.** Le constat attribuait l'arrêt au paramètre `skipbtn = 1` de la passerelle Stripe, et la 2.14 en tirait un geste pour Thomas. **C'était faux, et le geste est retiré.** Lu dans `wp-vikstripe/stripe.php:233` : `skipbtn` est le paramètre **« Auto-redirect »** de VikStripe, aux options **inversées**, `1 => No` et `0 => Yes`. `skipbtn = 1` signifie donc que le client voit le bouton **PAY NOW** et doit cliquer ; il ne contourne pas Stripe. Et la redirection automatique, quand elle est active, est un **script JavaScript** (`stripe.php:549`), qu'un parcours en `curl` n'exécute pas davantage.
+
+**La vraie cause** : le script s'arrête sur la page qui porte le bouton, sans le suivre. La commande reste en `standby` parce que personne n'a payé, et aucun e-mail ne part avant paiement. **Le correctif est dans le script** : le lien de Stripe Checkout est l'attribut `href` du premier enfant de `.stripe__payment__form__wrapper`, lisible dans le HTML sans rien exécuter. Le script le relève, le rend, et l'étape au navigateur de Cowork reprend à partir de là, comme prévu par le brief.
+
+**Ne pas toucher au réglage.** Le basculer ne débloquerait rien pour le script, et le faire un jour en production changerait le parcours des clients sans raison.
+
+**Et une promesse de mon brief qui ne tenait pas.** J'avais posé que `--nettoyer` annulerait les réservations d'essai par le contrôleur de Vik. `task=docancelbooking` exige `status = 'confirmed'` : une commande `standby` y répond `403`, testé pour de vrai. **La règle de nettoyage change donc** : ce que le script ne peut pas annuler, il le **marque et le recense**, et la reprise revient à l'administration de Vik ou au balayage de la parade D. Deux réservations restent sur la préproduction, **1826** et **1827**, au nom `RECETTE AUTOMATISEE - NE PAS TRAITER`, sans paiement.
 
 ### Les prérequis dormants, relevés le 23 septembre
 
@@ -352,7 +371,7 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 **Faits le 19 septembre**, retirés de cette liste : la sortie de la page 845 et des URL à `sid` de NitroPack, qui ne dispense pas de l'exclusion de l'hôte de réservation, G0, et G1.
 
 1. **Recréer la préproduction depuis la production. Fait le 20 septembre**, sous `staging13`. À refaire dès qu'elle aura dérivé : une recette menée sur une copie périmée ne prouve rien de la production.
-2. **Après chaque recréation**, deux gestes qui ne survivent pas à la copie, dans cet ordre : vérifier que `WP_ENVIRONMENT_TYPE` vaut bien `staging` ; **basculer VikStripe sur les clés de test**, la copie ramenant les clés de production avec la base.
+2. **Après chaque recréation**, deux gestes qui ne survivent pas à la copie, dans cet ordre : vérifier que `WP_ENVIRONMENT_TYPE` vaut bien `staging` ; **basculer VikStripe sur les clés de test**, la copie ramenant les clés de production avec la base .
 3. **Lancer `deployer-moteur.sh` sur la préproduction**, d'abord sans `--appliquer` pour lire ce qu'il changerait, puis avec.
 4. **Mener la recette**, les huit vérifications du chantier B.
 5. **Poser dans `wp-config.php` la clé Stripe restreinte en lecture et le secret de signature du webhook**, avant le déploiement de B6. La parade est tranchée depuis le 21 septembre, voir le chantier B ; ces deux valeurs sont la seule chose qu'elle attend de toi.
@@ -413,7 +432,9 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 
 > Lis `CLAUDE.md`, `docs/briefs/constat-fiche-saisie-tarifs.md` et `docs/briefs/journal-vik.md`. Thomas a saisi les lignes dans Vik. Vérifie par requête, en lecture seule, que chacune existe avec les valeurs attendues, que les saisons rejoignent les bonnes chambres par la jointure sur le jeton `-N-`, que les restrictions rejoignent la chambre 7, et qu'aucune ne dépasse un an de portée. Ajoute les preuves à `constat-phase-0.md` §Q6 sans réécrire les lignes closes. Si un écart apparaît, décris-le et arrête-toi : la correction est un geste de Thomas.
 
-### G2 — verrou d'hôte. Sonnet 5, effort moyen
+### G2 — verrou d'hôte. Sonnet 5, **effort élevé**
+
+**Effort relevé à la 2.14.** Pas pour la difficulté, pour le rayon d'action : une redirection mal conditionnée une heure de trop survit dans le navigateur des visiteurs, et ni une purge ni un correctif ne la rattrapent.
 
 > **À ne lancer qu'après G1**, c'est-à-dire une fois `docs/briefs/brief-verrou-hote-reservation.md` remplacé par la version à jour. Vérifie d'abord que le fichier que tu lis contient bien la décision du 302 pendant la recette et le filtre par `get_queried_object_id()` ; s'il n'en parle pas, arrête-toi, tu lis la mauvaise copie.
 >
@@ -433,6 +454,8 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 
 ## 7. Le rythme
 
+**Consigne à porter dans chaque prompt, décision du 24 septembre.** *Établis les prémisses que tu utilises contre leur source ; ne les reprends pas d'un constat ni d'un brief sans les revérifier.* Le seul échec sérieux de ce chantier, la phase 4 qui cassait tout paiement, vient d'une prémisse fausse reprise d'un constat, pas d'un défaut de modèle — et Cowork a commis la même faute deux fois en deux jours, en Opus. **Le modèle n'est pas la variable ; la vérification des prémisses l'est.** C'est ce que B9c et B9d ont démontré en faisant l'inverse.
+
 Une phase, une session, un commit, une revue. Ne jamais enchaîner deux phases sans revue : c'est en enchaînant qu'on livre une phase 2 bâtie sur une phase 1 fausse.
 
 Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun débloque une recette : les faire tard, c'est découvrir en fin de chantier qu'aucune phase n'est vérifiable.
@@ -445,6 +468,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.14 | 2026-09-24 | Recette automatisée livrée et revue : la garde de réservation fonctionne dans les deux sens. Ajout de B11, un défaut réel de `room-filter.php` qui rend la fiche d'une chambre étrangère. Le blocage des vérifications 5 à 7 attribué d'abord au réglage `skipbtn`, **puis corrigé le jour même** : `skipbtn` est le paramètre « Auto-redirect » de VikStripe, aux options inversées, et le blocage tient au script qui ne suit pas le bouton PAY NOW. Geste retiré du chapitre 4, ajout de B9g. Règle de nettoyage corrigée : une commande `standby` n'est pas annulable par le contrôleur de Vik. G2 passe en effort élevé. Consigne de vérification des prémisses portée au chapitre 7. |
 | 2.13 | 2026-09-23 | Vingt-trois prérequis dormants remontés des briefs, dont huit bloquants : `prerequis-dormants-2026-09-23.md`. Ajout de G2b, le fragment `.htaccess`, dont le plan ne portait aucune trace. G2 signale la page 6586 absente de la liste tranchée, G3 reprend la recette en six points du verrou. Deux trous nommés dans la recette. Règle posée : un prérequis se remonte au plan dans la même passe. |
 | 2.12 | 2026-09-22 | Réserve de B9e levée : hors requête HTTP, `wp_get_environment_type()` décide seul, et il est établi que le rappel de Vik passe aujourd'hui par la boucle HTTP de WP-Cron, donc aucun rappel n'avait disparu. Interdiction du « Push to Live » de SiteGround posée, qui emporterait l'environnement et l'adresse fourre-tout en production. Correction d'une seconde affirmation non vérifiée de Cowork. |
 | 2.11 | 2026-09-22 | B9e livré et revu : quatre défauts corrigés, deux durcissements en place, liste d'hôtes établie par preuve. **Une réserve bloquante** : hors requête HTTP, WP-CLI et cron en ligne de commande, la production n'est pas reconnue et l'envoi est abandonné sans avertissement, le rappel avant séjour en tête. Effet de bord noté : la liste dynamique du script emporte ce greffon au prochain déploiement, sans décision séparée. |
