@@ -225,7 +225,9 @@ qui aurait mérité sa propre investigation plutôt qu'un raccourci non
 vérifié. La couverture de ce cas précis reste celle des tests unitaires de
 `lme-brands` (`lme_brands_room_is_available()`), déjà verts.
 
-### 3.3 — `skipbtn=1` : aucune réservation de test n'atteint jamais Stripe Checkout sur cette préproduction
+### 3.3 — Aucune réservation de test n'atteint `checkout.stripe.com` sur cette préproduction : le script ne suit pas le lien du bouton PAY NOW
+
+**Correction du 24 septembre : ce chapitre attribuait le blocage à `skipbtn`, ce qui était faux.** Lu dans `wp-vikstripe/stripe.php:233`, `skipbtn` est le paramètre VikStripe **« Auto-redirect »**, aux options **inversées** (`1 => No`, `0 => Yes`) : il choisit seulement si le client est amené vers Stripe Checkout par un script JavaScript (`stripe.php:549`) ou doit cliquer le bouton **PAY NOW** — un lien qui pointe, dans les deux cas, vers la même session Stripe réelle (`tmpl/success.html.php`, attribut `href`). Il ne contourne jamais Stripe.
 
 Établi par lecture directe, non secrète, de `sir_vikbooking_gpayments` :
 
@@ -236,22 +238,25 @@ id  name                          published  skipbtn
 ```
 
 Les **deux** passerelles Stripe de cette installation, y compris la seule
-publiée (id 3), portent `skipbtn = 1`. Deux réservations réelles ont été
-créées pendant cette session (chambre 4 sous Sexcape Room, sid `1373638763` ;
-chambre 2 sous L'Instant Clé, sid `43003379`) : les deux ont été insérées en
-`standby` et redirigées **directement** vers la page de confirmation
-(`your-booking-detail`), sans jamais atteindre `checkout.stripe.com`. Aucun
+publiée (id 3), portent `skipbtn = 1` : Auto-redirect à No, le client voit le
+bouton **PAY NOW** plutôt que d'y être mené sans un clic. Deux réservations
+réelles ont été créées pendant cette session (chambre 4 sous Sexcape Room,
+sid `1373638763` ; chambre 2 sous L'Instant Clé, sid `43003379`) : les deux
+sont restées en `standby`, sur la page qui porte ce bouton — un parcours en
+`curl` n'exécute aucun JavaScript et ne clique aucun lien de lui-même, ce
+script ne l'a donc jamais suivi. Aucune des deux n'a atteint
+`checkout.stripe.com`, faute de paiement, pas faute d'y avoir droit. Aucun
 e-mail n'a été envoyé à cette étape — la transcription d'enveloppe du
 chapitre 1 n'a rien à montrer, pas parce qu'elle est en défaut, mais parce
-qu'aucun `wp_mail()` ne s'est déclenché pour une commande `standby` sur cette
-passerelle.
+qu'aucun `wp_mail()` ne s'est déclenché pour une commande `standby` sans
+paiement.
 
 **Conséquence en cascade, établie et non supposée :** les vérifications 5, 6
-(seconde moitié) et 7 ne peuvent pas se conclure sur cette préproduction tant
-que ce réglage n'est pas changé — un geste de Thomas dans l'administration de
-Vik (écran de la passerelle Stripe), jamais un geste de ce script, qui
-détecte ce réglage en préalable et le signale avant même de tenter une
-réservation.
+(seconde moitié) et 7 ne pouvaient pas se conclure sur cette préproduction
+tant que le script ne relevait pas ce lien dans le HTML pour le rendre à
+l'humain — un défaut du script, corrigé le 24 septembre (chapitre 4.3 du
+`plan-de-marche.md`), jamais un réglage à changer dans l'administration de
+Vik.
 
 **Effet secondaire, à connaître avant de relancer `--appliquer` :** une
 réservation qui reste en `standby` **ne peut pas être annulée par
@@ -275,6 +280,21 @@ ou reprise automatique par le balayage natif des commandes `standby`
 abandonnées le jour où la parade de paiement D (`plan-de-marche.md`) est en
 place. Ni l'une ni l'autre ne porte de paiement réel — `totpaid` vaut `NULL`
 sur les deux.
+
+**Confirmation du 24 septembre, script corrigé, rejoué pour de vrai contre le
+même hôte :** les deux passes ont cette fois relevé un vrai lien
+`checkout.stripe.com` dans la page portant le bouton PAY NOW — jamais atteint
+avant cette correction. Deux nouvelles réservations, `standby`, en attente du
+paiement de test au navigateur (chapitre 5) :
+
+| id | sid | chambre | marque | client |
+|---|---|---|---|---|
+| 1828 | 1381619067 | 4 | sexcaperoom | RECETTE AUTOMATISEE - NE PAS TRAITER |
+| 1829 | 177871985 | 2 | linstantcle | RECETTE AUTOMATISEE - NE PAS TRAITER |
+
+S'ajoutent à 1826 et 1827 ci-dessus, toujours non annulées. `--reprise 1828`
+et `--reprise 1829` continueront une fois la carte de test
+4242 4242 4242 4242 saisie au navigateur sur le lien imprimé par le script.
 
 ---
 

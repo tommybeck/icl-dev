@@ -331,10 +331,13 @@ case "$MODE" in
       kv SECRET_PREFIX INCONNU
     fi
     # skipbtn : réglage de la passerelle, structurel et non secret (booléen),
-    # relu par sa seule clé nommée — jamais le reste de params. Établi le
-    # 23 septembre 2026 : à 1, VikBooking crée la commande en standby et
-    # redirige directement vers la confirmation, sans jamais atteindre
-    # Stripe Checkout. Les vérifications 5, 6b et 7 en dépendent toutes.
+    # relu par sa seule clé nommée — jamais le reste de params. C'est le
+    # paramètre VikStripe « Auto-redirect » (wp-vikstripe/stripe.php:233,
+    # options inversées, 1 => No) : il ne contourne pas Stripe, il choisit
+    # entre une redirection JavaScript automatique et le clic d'un bouton
+    # PAY NOW — sans effet sur ce script, qui ne clique aucun bouton et
+    # relève le lien de paiement directement dans le HTML (chapitre 3.3 de
+    # constat-recette-automatisee.md, corrigé le 24 septembre 2026).
     Q2="SELECT JSON_UNQUOTE(JSON_EXTRACT(params,'\$.skipbtn')) FROM sir_vikbooking_gpayments WHERE file LIKE '%stripe%' AND published=1;"
     SKIPBTN=$(wp db query "$Q2" --path="$BASE" --skip-column-names 2>/dev/null | tr -d '\n\r')
     kv SKIPBTN "${SKIPBTN:-INCONNU}"
@@ -395,13 +398,11 @@ run_preconditions() {
   VIKSTRIPE_TEST_KEYS_OK=$([ "$prefix" = "sk_test_" ] && echo 1 || echo 0)
 
   local skipbtn; skipbtn=$(printf '%s\n' "$out" | kv_get SKIPBTN)
-  STRIPE_SKIPBTN="$skipbtn"
   if [ "$skipbtn" = "1" ]; then
-    jaune "  info  passerelle Stripe publiée en 'skipbtn=1' : les réservations resteront en 'standby' sans jamais atteindre Stripe Checkout — vérifications 5, 6b et 7 non concluantes tant que ce réglage n'est pas changé dans l'administration de Vik (geste de Thomas, jamais de ce script)"
+    info "  passerelle Stripe publiée en 'skipbtn=1' (Auto-redirect: No) : le client verra le bouton PAY NOW plutôt qu'une redirection JavaScript automatique — sans effet sur ce script, qui relève le lien Stripe Checkout dans le HTML plutôt que de suivre ce bouton (chapitre 3.3 du constat)"
   fi
 }
 VIKSTRIPE_TEST_KEYS_OK=0
-STRIPE_SKIPBTN=""
 
 # --------------------------------------------------------- levier (override)
 ORIGINAL_OVERRIDE_PRESENT=0

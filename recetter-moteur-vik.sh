@@ -86,6 +86,20 @@ extraire_valeur_champ() {
     | sed -E "s/^value=[\"']//; s/[\"']\$//"
 }
 
+# Lien Stripe Checkout : l'attribut href du premier enfant de
+# .stripe__payment__form__wrapper (wp-vikstripe/tmpl/success.html.php,
+# `<a href="<?php echo $checkout_session['url']; ?>">Pay Now</a>`), lu tel
+# quel dans le HTML rendu — jamais suivi, jamais cliqué, quel que soit
+# `skipbtn` (constat-recette-automatisee.md, chapitre 3.3).
+extraire_href_stripe_wrapper() {
+  local html="$1"
+  printf '%s' "$html" | tr -d '\n' \
+    | grep -oE 'class="[^"]*stripe__payment__form__wrapper[^"]*"[^>]*>[[:space:]]*<a[^>]*href="[^"]*"' \
+    | grep -oE 'href="[^"]*"' \
+    | tail -1 \
+    | sed -E 's/^href="//; s/"$//'
+}
+
 # --------------------------------------------------------------------- dates
 iso_plus_jours() {
   date -u -j -v+"$2"d -f '%Y-%m-%d' "$1" +%Y-%m-%d 2>/dev/null || date -u -d "$1 + $2 days" +%Y-%m-%d
@@ -139,11 +153,13 @@ vik_curl_post_brut() {
 # vik_creer_reservation ROOM_ID CHECKIN(YYYY-MM-DD) NUITS
 #
 # Résultat dans CREATE_STATUT : created | refused_403 | ambigu | erreur
-# Sur created : CREATE_SID, CREATE_TS, CREATE_IDORDER, CREATE_REDIRECT_URL.
+# Sur created : CREATE_SID, CREATE_TS, CREATE_IDORDER, CREATE_REDIRECT_URL,
+#               CREATE_STRIPE_HREF (lien Stripe Checkout relevé dans la page,
+#               vide si absent — voir extraire_href_stripe_wrapper()).
 # Sur refused_403 : CREATE_TITRE (titre de la page wp_die).
 vik_creer_reservation() {
   local room_id="$1" checkin_iso="$2" nuits="$3"
-  CREATE_STATUT="erreur"; CREATE_SID=""; CREATE_TS=""; CREATE_IDORDER=""; CREATE_REDIRECT_URL=""; CREATE_TITRE=""
+  CREATE_STATUT="erreur"; CREATE_SID=""; CREATE_TS=""; CREATE_IDORDER=""; CREATE_REDIRECT_URL=""; CREATE_STRIPE_HREF=""; CREATE_TITRE=""
 
   local checkout_iso checkin_ddmmyyyy checkout_ddmmyyyy
   checkout_iso=$(iso_plus_jours "$checkin_iso" "$nuits")
@@ -263,6 +279,7 @@ vik_creer_reservation() {
   [ -z "$CREATE_SID" ] && CREATE_SID=$(extraire_valeur_champ "$page_finale" "sid")
   CREATE_TS=$(printf '%s' "$VIK_LAST_URL" | grep -oE 'ts=[0-9]+' | head -1 | cut -d= -f2)
   CREATE_REDIRECT_URL="$VIK_LAST_URL"
+  CREATE_STRIPE_HREF=$(extraire_href_stripe_wrapper "$page_finale")
 
   if [ -z "$CREATE_SID" ]; then
     jaune "  signal ambigu : ni le refus de la garde (403 + titre attendu) ni une redirection portant 'sid' n'ont été observés"
@@ -426,34 +443,33 @@ verif5_6_reservation_reelle() {
     noter "6a OK  ($marque) aucune erreur payment-brand.php"
   fi
 
-  if printf '%s' "$CREATE_REDIRECT_URL" | grep -qiE 'checkout\.stripe\.com|stripe\.com'; then
-    vert "  OK   redirection vers Stripe Checkout : $CREATE_REDIRECT_URL"
-    noter "6b OK  ($marque) redirection Stripe Checkout observée"
+  # Vérification 6, seconde moitié : le lien de Stripe Checkout, relevé dans
+  # le HTML de la page qui porte le bouton PAY NOW — l'attribut href du
+  # premier enfant de .stripe__payment__form__wrapper
+  # (wp-vikstripe/tmpl/success.html.php), jamais suivi par ce script : un
+  # parcours en curl n'exécute aucun JavaScript et ne clique aucun bouton,
+  # que la passerelle publiée soit en 'skipbtn=1' (Auto-redirect: No,
+  # stripe.php:233) ou non — sans effet sur ce que cette page rend, seulement
+  # sur ce qu'un navigateur réel en ferait (stripe.php:549). Le préalable
+  # VIKSTRIPE_TEST_KEYS_OK (chapitre 2.1) garantit déjà, par le seul préfixe,
+  # que ce lien mène à des clés de test avant même de tenter une réservation.
+  if printf '%s' "$CREATE_STRIPE_HREF" | grep -qiE '^https://checkout\.stripe\.com/'; then
+    vert "  OK   lien Stripe Checkout relevé dans la page : $CREATE_STRIPE_HREF"
+    noter "6b OK  ($marque) lien Stripe Checkout relevé dans la page"
     echo
     jaune "  ÉTAPE HUMAINE — Stripe Checkout, carte de test 4242 4242 4242 4242 :"
-    jaune "  $CREATE_REDIRECT_URL"
+    jaune "  $CREATE_STRIPE_HREF"
     jaune "  Une fois la carte saisie et validée : ./recetter-moteur.sh --hote $HOTE --reprise $CREATE_IDORDER"
-  elif [ "$STRIPE_SKIPBTN" = "1" ]; then
-    jaune "  KO attendu : la passerelle Stripe publiée est en 'skipbtn=1' (établi en préalable) — la réservation reste en 'standby', jamais en 'confirmed', et rien ne va à Stripe Checkout par ce chemin"
-    jaune "  URL atteinte directement : $CREATE_REDIRECT_URL"
-    jaune "  Sans ce réglage changé dans l'administration de Vik (geste de Thomas), les vérifications 6b, 5 et 7 restent non concluantes pour cette réservation, et --nettoyer ne pourra pas l'annuler : task=docancelbooking exige status='confirmed' (site/controller.php, docancelbooking()), jamais atteint depuis 'standby' sans paiement"
-    noter "6b KO ($marque) skipbtn=1 : Stripe Checkout jamais atteint, réservation restera en 'standby' — geste de Thomas requis"
-    noter "5  ??  ($marque) non concluant : aucune confirmation n'a lieu tant que skipbtn=1"
-    noter "7  ??  ($marque) non concluant : aucune réservation confirmée à rappeler tant que skipbtn=1"
-    registre_maj_statut "$CREATE_IDORDER" "standby_sans_paiement"
+  else
+    rouge "  KO   aucun lien checkout.stripe.com trouvé dans la page (.stripe__payment__form__wrapper absent, ou href inattendu)"
+    jaune "  valeur relevée : '${CREATE_STRIPE_HREF:-vide}'"
+    noter "6b KO ($marque) lien Stripe Checkout introuvable dans la page"
+    noter "5  ??  ($marque) non concluant : pas de lien Stripe Checkout à rendre à l'humain"
+    noter "7  ??  ($marque) non concluant : pas de lien Stripe Checkout à rendre à l'humain"
+    registre_maj_statut "$CREATE_IDORDER" "a_nettoyer"
     echo
     jaune "  Réservation #$CREATE_IDORDER (sid=$CREATE_SID) laissée en 'standby' sur $HOTE, marquée dans Vik (« ${MARQUAGE_PRENOM} ${MARQUAGE_NOM} »)."
-    jaune "  Elle ne peut être annulée que par Thomas dans l'administration de Vik, ou reprise par le balayage natif"
-    jaune "  des commandes standby abandonnées (plan-de-marche.md, chantier D) une fois ce chantier en place."
-    return
-  else
-    jaune "  redirection non reconnue comme Stripe Checkout : $CREATE_REDIRECT_URL"
-    jaune "  (skipbtn n'est pourtant pas à 1 en préalable : signal inattendu, à examiner à l'œil avant de rejouer)"
-    noter "6b ??  ($marque) redirection non reconnue comme Stripe, cause à établir"
-    echo
-    jaune "  ÉTAPE HUMAINE — Stripe Checkout, carte de test 4242 4242 4242 4242 :"
-    jaune "  $CREATE_REDIRECT_URL"
-    jaune "  Une fois la carte saisie et validée : ./recetter-moteur.sh --hote $HOTE --reprise $CREATE_IDORDER"
+    jaune "  À examiner à l'œil avant de rejouer — relancer avec --nettoyer une fois la cause établie."
   fi
 }
 
