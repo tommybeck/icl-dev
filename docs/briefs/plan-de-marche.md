@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.16, 24 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.16 rend à B11 son caractère bloquant, après vérification complète au navigateur : le formulaire de réservation visible bascule sur la chambre étrangère.
+**Version 2.17, 24 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.17 acte la première recette complète en deux passes : la vérification 2 mesure la mauvaise chose, et la garde ne répond pas nettement dans le sens L'Instant Clé.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -88,9 +88,10 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B9d | Vérifier la signature réelle de chaque crochet auquel `lme-brands` s'accroche | Sonnet 5, faible | **fait** le 22 septembre, commit `4a34466`, `constat-signatures-crochets.md`, revue faite. Treize crochets, **aucun écart** hors celui déjà corrigé |
 | B9e | Garde-fou de redirection des e-mails hors production | Sonnet 5, faible | **fait** le 22 septembre, commits `8327ba0` et `d9a123e`, `constat-mail-guard.md`, revue faite. Réserve levée |
 | B9f | Recette automatisée : transcription d'enveloppe et `recetter-moteur.sh` | Sonnet 5, moyen | **fait** le 23 septembre, commit `42cc5b1`, `constat-recette-automatisee.md`, revue faite |
-| B11 | Corriger `room-filter.php` : un paramètre `roomid` étranger fait basculer le formulaire de réservation **visible** sur la chambre étrangère | Sonnet 5, moyen | ouvert, **bloquant pour B10** |
+| B9h | Établir pourquoi la garde ne rend pas de `403` net en passe L'Instant Clé | Sonnet 5, faible | **nouveau**, avant B11 |
+| B11 | Corriger `room-filter.php` : un paramètre `roomid` étranger fait basculer le formulaire de réservation **visible** sur la chambre étrangère ; **et corriger la vérification 2**, qui mesure la mauvaise chose | Sonnet 5, moyen | ouvert, **bloquant pour B10** |
 | B9g | Faire relever par `recetter-moteur.sh` le lien Stripe Checkout sur la page du bouton PAY NOW, puis rendre la main au navigateur | Sonnet 5, faible | **fait** le 24 septembre, commit `f246db6`. Les deux passes atteignent Stripe Checkout, réservations 1828 et 1829 |
-| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis restants : B11, les vérifications 5 à 7, G0 et G3** |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis restants : B9h, B11, les vérifications 5 à 7, G0 et G3** |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
@@ -144,6 +145,25 @@ Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette r
 **Ne pas toucher au réglage.** Le basculer ne débloquerait rien pour le script, et le faire un jour en production changerait le parcours des clients sans raison.
 
 **Et une promesse de mon brief qui ne tenait pas.** J'avais posé que `--nettoyer` annulerait les réservations d'essai par le contrôleur de Vik. `task=docancelbooking` exige `status = 'confirmed'` : une commande `standby` y répond `403`, testé pour de vrai. **La règle de nettoyage change donc** : ce que le script ne peut pas annuler, il le **marque et le recense**, et la reprise revient à l'administration de Vik ou au balayage de la parade D. Deux réservations restent sur la préproduction, **1826** et **1827**, au nom `RECETTE AUTOMATISEE - NE PAS TRAITER`, sans paiement.
+
+### La première recette complète — 24 septembre
+
+`recetter-moteur.sh --appliquer`, les deux passes d'un seul trait, levier restauré à sa valeur d'entrée à la fin.
+
+| # | Sexcape Room | L'Instant Clé |
+|---|---|---|
+| 1 | OK | OK |
+| 2 | KO, **mais la mesure est fausse**, voir ci-dessous | idem |
+| 3a | **OK**, `403` net | **ambigu** : `200` sur `/fr/reserver/`, ni refus ni `sid`. Tâche B9h |
+| 3b | non concluant, connu | non concluant, connu |
+| 4 | OK | OK |
+| 6a, 6b | OK, Stripe Checkout atteint, réservation 1830 | OK, réservation 1831 |
+| 5, 6c | à la reprise, après paiement de test | idem |
+| 8 | KO annoncé, G2 absent | — |
+
+**La vérification 2 cherche le nom de la chambre étrangère dans toute la page.** Or la préproduction est une copie de linstantcle.ch, dont le menu de navigation nomme L'Aparté, L'Entracte et Le Boudoir du Désir sur chaque page. **Le KO des quatre vues est donc garanti par construction**, que `room-filter.php` fonctionne ou non. Seul le KO de `roomdetails` est établi pour de vrai, par comparaison au navigateur avec et sans paramètre ; les trois autres vues ne sont pas mesurées. **La vérification doit porter sur les identifiants de chambre dans les formulaires et les conteneurs de Vik** — `roomdetail`, `roomid`, les résultats de recherche — que le menu ne contient jamais. C'est la faute de mon brief, qui demandait une « assertion d'absence » sans dire de quoi.
+
+**La garde n'a pas répondu nettement dans le sens L'Instant Clé.** En passe Sexcape Room, la tentative de réserver L'Aparté est refusée par un `403` : c'est ce qui était déjà établi. En passe L'Instant Clé, la tentative de réserver le Boudoir aboutit à une page `200` sur `/fr/reserver/`, sans refus et sans `sid`. **C'est précisément le sens qui protège linstantcle.ch, la marque qui vend.** Une soumission incomplète, que `saveorder()` renvoie sans bruit vers la recherche, produirait ce signal, mais c'est une hypothèse. Tâche B9h, avant B11, parce qu'on ne corrige pas la présentation tant que la seule garantie opposable n'est pas prouvée dans les deux sens.
 
 ### Les prérequis dormants, relevés le 23 septembre
 
@@ -475,6 +495,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.17 | 2026-09-24 | Première recette complète en deux passes. La vérification 2 cherche le nom dans toute la page, menu compris : son KO est garanti par construction, et seule `roomdetails` est établie pour de vrai. B11 corrige aussi la mesure. La garde rend un signal ambigu en passe L'Instant Clé, le sens qui protège la marque qui vend : ajout de B9h, avant B11. |
 | 2.16 | 2026-09-24 | B11 redevient bloquant pour B10. Vérification complète au navigateur, avec et sans le paramètre : un seul composant Vik par page, aucun formulaire superflu dans le DOM, mais le formulaire **visible** bascule sur la chambre étrangère. Sans B11, le déploiement transformerait un parcours qui aboutit aujourd'hui en impasse à `403`. La 2.15 concluait l'inverse sur la foi du seul bloc descriptif masqué. |
 | 2.15 | 2026-09-24 | B9g livré : les deux passes atteignent Stripe Checkout, les vérifications 5 à 7 deviennent possibles. B11 ramené à sa portée réelle, vérifiée au navigateur : le composant Vik charge la chambre étrangère dans un conteneur masqué, seulement par URL fabriquée, et la garde refuse la réservation ; non bloquant pour B10. En-tête de la 2.14 corrigé, qui annonçait encore le réglage `skipbtn` retiré dans son propre journal. |
 | 2.14 | 2026-09-24 | Recette automatisée livrée et revue : la garde de réservation fonctionne dans les deux sens. Ajout de B11, un défaut réel de `room-filter.php` qui rend la fiche d'une chambre étrangère. Le blocage des vérifications 5 à 7 attribué d'abord au réglage `skipbtn`, **puis corrigé le jour même** : `skipbtn` est le paramètre « Auto-redirect » de VikStripe, aux options inversées, et le blocage tient au script qui ne suit pas le bouton PAY NOW. Geste retiré du chapitre 4, ajout de B9g. Règle de nettoyage corrigée : une commande `standby` n'est pas annulable par le contrôleur de Vik. G2 passe en effort élevé. Consigne de vérification des prémisses portée au chapitre 7. |
