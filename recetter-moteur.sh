@@ -37,7 +37,10 @@
 #
 # Ce que ce script ne fait jamais : lire une clé Stripe (secrète ou publiable
 # au-delà de son préfixe), écrire en base par SQL, déployer quoi que ce soit,
-# ou tourner ailleurs qu'en préproduction stricte.
+# ou tourner ailleurs qu'en préproduction stricte. Il ne crée ni n'annule
+# aucune réservation tant que Vik Channel Manager n'est pas constaté inactif
+# ou absent sur la cible, --nettoyer et --reprise compris
+# (docs/briefs/constat-integrations-sortantes.md §3).
 #
 set -u
 
@@ -85,7 +88,7 @@ info()  { printf '  %s\n' "$*"; }
 titre() { printf '\n== %s ==\n' "$*"; }
 mourir(){ rouge "ERREUR : $*"; exit 1; }
 
-usage() { sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -337,6 +340,24 @@ case "$MODE" in
     exit 0
     ;;
 
+  vcm-status)
+    # État de Vik Channel Manager sur la cible : active, inactive, absent, ou
+    # tout autre statut que wp-cli rapporte (active-network…). Lu par
+    # `wp plugin list` avec --skip-plugins : l'état vient de l'option
+    # active_plugins, sans charger aucun greffon — ni VCM lui-même, ni
+    # TranslatePress, qui réécrit la sortie de wp eval
+    # (constat-integrations-sortantes.md §0). Aucune valeur de configuration
+    # lue : un nom de greffon et un statut.
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    LISTE=$(wp plugin list --fields=name,status --format=csv --path="$BASE" --skip-plugins --skip-themes 2>/dev/null) \
+      || { err "wp plugin list a échoué"; exit 1; }
+    [ "$(printf '%s\n' "$LISTE" | head -1)" = "name,status" ] \
+      || { err "sortie de wp plugin list inattendue : état de Vik Channel Manager indéterminé"; exit 1; }
+    STATUT=$(printf '%s\n' "$LISTE" | awk -F, '$1=="vikchannelmanager"{print $2; exit}')
+    kv VCM_STATUS "${STATUT:-absent}"
+    exit 0
+    ;;
+
   vikstripe-test-keys)
     # Même geste que deployer-moteur.sh : LEFT(...,8) posé par la requête SQL
     # elle-même, jamais la clé, jamais son chargement en mémoire côté script.
@@ -385,6 +406,37 @@ kv_get() {
 
 expected_env_hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
 
+# ------------------------------------------------ Vik Channel Manager éteint
+# docs/briefs/incident-preproduction-vers-plateformes-2026-09-24.md : actif sur
+# la préproduction, Vik Channel Manager pousse chaque réservation d'essai vers
+# Airbnb, Booking.com et Expedia, qui ferment de vraies nuits. Toute création
+# ET toute annulation de réservation passe par lui (l'annulation pousse une
+# disponibilité calculée sur la base de préproduction, qui ignore les
+# réservations de production faites depuis la copie). Seuls « inactive » et
+# « absent » passent : un statut inconnu ou illisible refuse, jamais deviné.
+VCM_INACTIF_VERIFIE=0
+
+vcm_statut_cible() {
+  local out statut
+  out=$(remote_call vcm-status) || return 1
+  statut=$(printf '%s\n' "$out" | kv_get VCM_STATUS)
+  [ -n "$statut" ] || return 1
+  printf '%s' "$statut"
+}
+
+vcm_statut_acceptable() {
+  [ "$1" = "inactive" ] || [ "$1" = "absent" ]
+}
+
+exiger_vcm_inactif() {
+  local geste="$1" statut
+  statut=$(vcm_statut_cible) || mourir "état de Vik Channel Manager illisible sur $HOTE : $geste refusé"
+  vcm_statut_acceptable "$statut" \
+    || mourir "Vik Channel Manager est '$statut' sur $HOTE : $geste refusé, chaque réservation y part vers les plateformes. Le désactiver (Plugins) avant de relancer."
+  vert "  OK   Vik Channel Manager '$statut' sur $HOTE"
+  VCM_INACTIF_VERIFIE=1
+}
+
 # ---------------------------------------------------------- préalables
 PRECOND_OK=1
 check() {
@@ -408,6 +460,17 @@ run_preconditions() {
 
   if [ "$PRECOND_OK" -ne 1 ]; then
     return
+  fi
+
+  # Refus global, même sans --appliquer : la vérification 3 crée une
+  # réservation si la garde de lme-brands la laisse passer.
+  local vcm
+  if vcm=$(vcm_statut_cible); then
+    check "Vik Channel Manager inactif (aucune réservation d'essai vers les plateformes)" \
+      "$(vcm_statut_acceptable "$vcm" && echo 1 || echo 0)" "statut relevé : $vcm"
+    vcm_statut_acceptable "$vcm" && VCM_INACTIF_VERIFIE=1
+  else
+    check "Vik Channel Manager inactif (aucune réservation d'essai vers les plateformes)" 0 "état illisible"
   fi
 
   out=$(remote_call vikstripe-test-keys)
@@ -801,12 +864,14 @@ source "$REPO_ROOT/recetter-moteur-vik.sh"
 if [ "$NETTOYER" -eq 1 ]; then
   titre "Nettoyage — $HOTE"
   OVERRIDE_RESTORE_NEEDED=0
+  exiger_vcm_inactif "le nettoyage (annulations)"
   nettoyer_registre
   exit 0
 fi
 
 if [ -n "$REPRISE_IDORDER" ]; then
   OVERRIDE_RESTORE_NEEDED=0
+  exiger_vcm_inactif "la reprise (rappel puis annulation)"
   reprendre_reservation "$REPRISE_IDORDER"
   exit $?
 fi

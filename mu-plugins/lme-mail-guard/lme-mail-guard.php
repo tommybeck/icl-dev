@@ -10,7 +10,11 @@
  * une adresse fourre-tout unique, partout sauf en production stricte
  * (wp_get_environment_type() === 'production' ET hôte de la requête dans
  * la liste des hôtes de cette installation), pour recetter les parcours
- * de réservation sans jamais écrire à un vrai client.
+ * de réservation sans jamais écrire à un vrai client. Au dernier moment
+ * (phpmailer_init), ce même détournement vide encore tous les destinataires
+ * de PHPMailer et ne remet que l'adresse fourre-tout : un greffon qui en
+ * ajoute après le filtre wp_mail est neutralisé et journalisé
+ * (docs/briefs/constat-integrations-sortantes.md §4).
  *
  * Ce que ce greffon NE fait JAMAIS : il ne touche ni From, ni Sender, ni
  * Reply-To d'aucun message. L'identité d'envoi par marque est posée en

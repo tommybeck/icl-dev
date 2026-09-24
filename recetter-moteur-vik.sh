@@ -179,6 +179,12 @@ vik_creer_reservation() {
   local room_id="$1" checkin_iso="$2" nuits="$3"
   CREATE_STATUT="erreur"; CREATE_SID=""; CREATE_TS=""; CREATE_IDORDER=""; CREATE_REDIRECT_URL=""; CREATE_STRIPE_HREF=""; CREATE_TITRE=""; CREATE_MESSAGE_VIK=""
 
+  # Dernier rempart, quel que soit l'appelant : jamais une création sans que
+  # Vik Channel Manager ait été constaté inactif sur la cible pendant cette
+  # exécution (recetter-moteur.sh, exiger_vcm_inactif / run_preconditions).
+  [ "${VCM_INACTIF_VERIFIE:-0}" -eq 1 ] \
+    || mourir "création de réservation refusée : Vik Channel Manager n'a pas été constaté inactif sur $HOTE"
+
   local checkout_iso checkin_ddmmyyyy checkout_ddmmyyyy
   checkout_iso=$(iso_plus_jours "$checkin_iso" "$nuits")
   checkin_ddmmyyyy=$(iso_vers_ddmmyyyy "$checkin_iso")
@@ -354,6 +360,11 @@ vik_creer_reservation() {
 # chantier D) reprend les commandes standby abandonnées.
 vik_annuler_reservation() {
   local idorder="$1" sid="$2" courriel="$3"
+
+  # Même rempart que vik_creer_reservation() : une annulation pousse elle
+  # aussi une disponibilité vers les plateformes si VCM est actif.
+  [ "${VCM_INACTIF_VERIFIE:-0}" -eq 1 ] \
+    || mourir "annulation de réservation refusée : Vik Channel Manager n'a pas été constaté inactif sur $HOTE"
 
   local page_confirmation; page_confirmation=$(vik_get "https://$HOTE/index.php?option=com_vikbooking&view=booking&sid=${sid}&idorder=${idorder}")
   local viktoken vikwp_nonce

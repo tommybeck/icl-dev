@@ -2,7 +2,7 @@
 /**
  * lme-mail-guard — accroche WordPress.
  *
- * Deux crochets natifs du cœur, tous deux lus dans wp-includes/pluggable.php
+ * Trois crochets natifs du cœur, tous lus dans wp-includes/pluggable.php
  * (wp_mail(), lu sur le serveur linstantcle.ch le 22 septembre 2026, PHP
  * 8.2.33 / WordPress 6.9) plutôt que supposés :
  *
@@ -18,7 +18,14 @@
  *     fourre-tout absente hors production) sans faire partir un message
  *     avec zéro destinataire vers PHPMailer.
  *
- * Priorité PHP_INT_MAX sur les deux : ce greffon doit avoir le dernier mot
+ *   - `phpmailer_init` (do_action_ref_array( 'phpmailer_init', … ), juste
+ *     avant $phpmailer->send(), relu le 24 septembre 2026, pluggable.php:622
+ *     et :628) : hors production, vide To, Cc et Bcc et ne remet que
+ *     l'adresse fourre-tout, pour qu'aucun greffon ne puisse ajouter un
+ *     destinataire après le filtre `wp_mail`. Placé en dernier, voir
+ *     lme_mail_guard_hook_phpmailer_last().
+ *
+ * Priorité PHP_INT_MAX sur les trois : ce greffon doit avoir le dernier mot
  * sur `to` et `headers`, après tout autre code qui aurait pu y toucher
  * (Vik, MailPoet, WPForms, ou un futur greffon) — jamais l'inverse.
  */
@@ -253,3 +260,137 @@ function lme_mail_guard_maybe_abort_send( $pre, $atts ) {
 	return false;
 }
 add_filter( 'pre_wp_mail', 'lme_mail_guard_maybe_abort_send', PHP_INT_MAX, 2 );
+
+/**
+ * Adresses To, Cc et Bcc portées par l'objet PHPMailer. Les trois accesseurs
+ * rendent des paires [adresse, nom] (PHPMailer 6, embarqué par le cœur).
+ *
+ * @param object $phpmailer
+ * @return string[]
+ */
+function lme_mail_guard_phpmailer_addresses( $phpmailer ) {
+	$addresses = array();
+
+	foreach ( array( 'getToAddresses', 'getCcAddresses', 'getBccAddresses' ) as $getter ) {
+		foreach ( (array) $phpmailer->$getter() as $pair ) {
+			if ( is_array( $pair ) && isset( $pair[0] ) ) {
+				$addresses[] = (string) $pair[0];
+			}
+		}
+	}
+
+	return $addresses;
+}
+
+/**
+ * Dernier mot sur les destinataires, hors production : vide To, Cc et Bcc de
+ * PHPMailer et ne remet que l'adresse fourre-tout, pour qu'aucun greffon ne
+ * puisse ajouter un destinataire après le filtre `wp_mail` ci-dessus.
+ * `phpmailer_init` est le dernier crochet de wp_mail() avant
+ * `$phpmailer->send()` (wp-includes/pluggable.php) ; lme_mail_guard_hook_phpmailer_last()
+ * y place ce rappel en dernier.
+ *
+ * Ne touche ni From, ni Sender, ni Reply-To : clearAllRecipients() ne vide
+ * que To, Cc et Bcc, jamais les adresses de réponse (lme-mail-guard.php).
+ *
+ * Ce que ce crochet ne couvre pas : un greffon qui envoie sans passer par
+ * wp_mail(), avec sa propre instance de PHPMailer ou une API (MailPoet par
+ * son service), ou qui modifie les destinataires après phpmailer_init.
+ * docs/briefs/constat-integrations-sortantes.md §4.
+ *
+ * @param object $phpmailer Instance passée par référence par wp_mail().
+ */
+function lme_mail_guard_enforce_phpmailer_recipients( $phpmailer ) {
+	if ( ! lme_mail_guard_current_should_redirect() ) {
+		return;
+	}
+
+	$required = array( 'getToAddresses', 'getCcAddresses', 'getBccAddresses', 'clearAllRecipients', 'addAddress' );
+
+	foreach ( $required as $method ) {
+		if ( ! is_object( $phpmailer ) || ! method_exists( $phpmailer, $method ) ) {
+			lme_mail_guard_log(
+				'error',
+				'phpmailer_unexpected',
+				sprintf(
+					"Hors production, l'objet reçu par phpmailer_init n'a pas la méthode %s() : destinataires non vérifiés au dernier moment, seul le filtre wp_mail les a réécrits.",
+					$method
+				),
+				array(
+					'classe' => is_object( $phpmailer ) ? get_class( $phpmailer ) : gettype( $phpmailer ),
+					'host'   => lme_mail_guard_current_host(),
+				)
+			);
+			return;
+		}
+	}
+
+	$plan = lme_mail_guard_plan_final_recipients(
+		lme_mail_guard_phpmailer_addresses( $phpmailer ),
+		lme_mail_guard_resolved_catchall()
+	);
+
+	$phpmailer->clearAllRecipients();
+
+	foreach ( $plan['keep'] as $address ) {
+		// wp_mail() crée PHPMailer avec les exceptions actives, et
+		// phpmailer_init est appelé hors de son try (pluggable.php:622) : une
+		// exception ici serait fatale. L'adresse a déjà été acceptée par
+		// wp_mail() plus haut, ce repli ne devrait jamais servir.
+		try {
+			$phpmailer->addAddress( $address );
+		} catch ( \Exception $e ) {
+			lme_mail_guard_log(
+				'error',
+				'catchall_rejected',
+				"Hors production, PHPMailer refuse l'adresse fourre-tout à phpmailer_init : aucun destinataire, PHPMailer refusera l'envoi.",
+				array(
+					'exception' => $e->getMessage(),
+					'host'      => lme_mail_guard_current_host(),
+				)
+			);
+		}
+	}
+
+	if ( ! empty( $plan['dropped'] ) ) {
+		lme_mail_guard_log(
+			'warning',
+			'recipients_added_after_filter',
+			sprintf(
+				"Hors production, %d destinataire(s) autre(s) que l'adresse fourre-tout présent(s) sur PHPMailer à phpmailer_init, ajouté(s) après le filtre wp_mail : retiré(s) avant l'envoi.",
+				count( $plan['dropped'] )
+			),
+			array(
+				'domaines' => lme_mail_guard_address_domains( $plan['dropped'] ),
+				'host'     => lme_mail_guard_current_host(),
+			)
+		);
+	}
+
+	if ( empty( $plan['keep'] ) ) {
+		lme_mail_guard_log(
+			'error',
+			'catchall_not_configured',
+			"Hors production, phpmailer_init atteint sans adresse fourre-tout configurée (pre_wp_mail court-circuité ailleurs ?) : tous les destinataires sont retirés, PHPMailer refusera l'envoi.",
+			array(
+				'host' => lme_mail_guard_current_host(),
+			)
+		);
+	}
+}
+
+/**
+ * Place lme_mail_guard_enforce_phpmailer_recipients() en dernier sur
+ * `phpmailer_init`. À priorité égale, WordPress exécute les rappels dans
+ * l'ordre d'enregistrement, et un mu-plugin s'enregistre avant tout greffon :
+ * PHP_INT_MAX seul laisserait passer après nous un greffon posé à la même
+ * priorité. Enregistré dès le chargement, pour les envois antérieurs à
+ * `wp_loaded`, puis retiré et remis sur `wp_loaded`, une fois tous les
+ * greffons et le thème chargés, pour repasser en queue.
+ */
+function lme_mail_guard_hook_phpmailer_last() {
+	remove_action( 'phpmailer_init', 'lme_mail_guard_enforce_phpmailer_recipients', PHP_INT_MAX );
+	add_action( 'phpmailer_init', 'lme_mail_guard_enforce_phpmailer_recipients', PHP_INT_MAX );
+}
+lme_mail_guard_hook_phpmailer_last();
+add_action( 'wp_loaded', 'lme_mail_guard_hook_phpmailer_last', PHP_INT_MAX );

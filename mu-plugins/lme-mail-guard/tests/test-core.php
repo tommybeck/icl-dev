@@ -386,6 +386,59 @@ lme_mail_guard_test_assert_same(
 	'FORCE_EMAIL_REDIRECT=true : détournement et transcription actifs même sur un hôte de production (cas du clone qui garde le domaine)'
 );
 
+echo "== lme_mail_guard_plan_final_recipients() : phpmailer_init, dernier mot hors production ==\n";
+
+$catchall = 'recette@boite-fourre-tout.example';
+
+lme_mail_guard_test_assert_same(
+	array( 'keep' => array( $catchall ), 'dropped' => array() ),
+	lme_mail_guard_plan_final_recipients( array( $catchall ), $catchall ),
+	'cas normal : seule la fourre-tout, déjà posée par le filtre wp_mail, rien à signaler'
+);
+lme_mail_guard_test_assert_same(
+	array( 'keep' => array( $catchall ), 'dropped' => array() ),
+	lme_mail_guard_plan_final_recipients( array( '  RECETTE@Boite-Fourre-Tout.example ' ), $catchall ),
+	'la fourre-tout reconnue sans casse ni espaces, jamais signalée comme ajout'
+);
+lme_mail_guard_test_assert_same(
+	array( 'keep' => array( $catchall ), 'dropped' => array( 'client@example.ch', 'espion@example.org' ) ),
+	lme_mail_guard_plan_final_recipients( array( $catchall, 'client@example.ch', 'espion@example.org' ), $catchall ),
+	'un To et un Bcc ajoutés après le filtre wp_mail : retirés et signalés, la fourre-tout seule conservée'
+);
+lme_mail_guard_test_assert_same(
+	array( 'keep' => array( $catchall ), 'dropped' => array( 'client@example.ch' ) ),
+	lme_mail_guard_plan_final_recipients( array( 'client@example.ch' ), $catchall ),
+	"la fourre-tout retirée par un autre greffon : remise, l'adresse substituée signalée"
+);
+lme_mail_guard_test_assert_same(
+	array( 'keep' => array( $catchall ), 'dropped' => array() ),
+	lme_mail_guard_plan_final_recipients( array(), $catchall ),
+	'aucun destinataire présent : la fourre-tout est remise quand même'
+);
+lme_mail_guard_test_assert_same(
+	array( 'keep' => array(), 'dropped' => array( 'client@example.ch' ) ),
+	lme_mail_guard_plan_final_recipients( array( 'client@example.ch' ), null ),
+	'fourre-tout non configurée : aucun destinataire gardé (PHPMailer refusera), jamais une adresse par défaut'
+);
+lme_mail_guard_test_assert_same(
+	array( 'keep' => array(), 'dropped' => array() ),
+	lme_mail_guard_plan_final_recipients( array( '', '   ', 42 ), null ),
+	'entrées vides ou non-chaînes ignorées, sans erreur'
+);
+
+echo "== lme_mail_guard_address_domains() ==\n";
+
+lme_mail_guard_test_assert_same(
+	array( 'example.ch', 'example.org' ),
+	lme_mail_guard_address_domains( array( 'b@Example.CH', 'a@example.org', 'c@example.ch' ) ),
+	'domaines en minuscules, dédoublonnés et triés, jamais la partie locale'
+);
+lme_mail_guard_test_assert_same(
+	array( '(sans domaine)' ),
+	lme_mail_guard_address_domains( array( 'pas-une-adresse' ) ),
+	'adresse sans arobase : marquée, sans erreur'
+);
+
 echo "\n{$GLOBALS['lme_mail_guard_test_count']} tests, {$GLOBALS['lme_mail_guard_test_failures']} échec(s).\n";
 
 exit( $GLOBALS['lme_mail_guard_test_failures'] > 0 ? 1 : 0 );

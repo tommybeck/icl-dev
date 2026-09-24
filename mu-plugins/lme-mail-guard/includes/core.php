@@ -416,3 +416,69 @@ function lme_mail_guard_resolve_catchall( $defined, $raw_value ) {
 
 	return '' === $value ? null : $value;
 }
+
+/**
+ * Destinataires définitifs d'un message détourné, décidés au dernier moment
+ * où WordPress laisse la main : `phpmailer_init`, dans wp_mail(), juste avant
+ * `$phpmailer->send()`. Le filtre `wp_mail` de ce greffon réécrit `to` et
+ * retire Cc/Bcc, mais tout greffon peut encore appeler addAddress(), addCC()
+ * ou addBCC() sur l'objet PHPMailer après lui ; ici, hors production, tout est
+ * vidé et seule l'adresse fourre-tout est remise.
+ *
+ * Aucune adresse fourre-tout (null) : aucun destinataire. PHPMailer refuse
+ * alors d'envoyer (« You must provide at least one recipient »), wp_mail()
+ * l'intercepte et rend false — le repli inerte du brief, jamais une adresse
+ * par défaut.
+ *
+ * `dropped` liste les adresses présentes qui ne sont pas la fourre-tout,
+ * comparées sans casse ni espaces : ce sont celles qu'un autre code a
+ * ajoutées après le filtre `wp_mail`, que l'appelant doit journaliser
+ * (règle absolue n°6).
+ *
+ * @param string[]    $present  Adresses de To, Cc et Bcc au moment de phpmailer_init.
+ * @param string|null $catchall lme_mail_guard_resolve_catchall().
+ * @return array{keep: string[], dropped: string[]}
+ */
+function lme_mail_guard_plan_final_recipients( array $present, $catchall ) {
+	$catchall_norm = is_string( $catchall ) ? strtolower( trim( $catchall ) ) : '';
+	$dropped       = array();
+
+	foreach ( $present as $address ) {
+		if ( ! is_string( $address ) || '' === trim( $address ) ) {
+			continue;
+		}
+
+		if ( '' !== $catchall_norm && strtolower( trim( $address ) ) === $catchall_norm ) {
+			continue;
+		}
+
+		$dropped[] = trim( $address );
+	}
+
+	return array(
+		'keep'    => '' === $catchall_norm ? array() : array( trim( $catchall ) ),
+		'dropped' => $dropped,
+	);
+}
+
+/**
+ * Domaines des adresses écartées, dédoublonnés et triés : ce que le journal
+ * garde d'un destinataire ajouté après le filtre, pour savoir quel code l'a
+ * posé sans écrire une adresse personnelle de plus dans debug.log.
+ *
+ * @param string[] $addresses
+ * @return string[]
+ */
+function lme_mail_guard_address_domains( array $addresses ) {
+	$domains = array();
+
+	foreach ( $addresses as $address ) {
+		$at = strrpos( (string) $address, '@' );
+		$domains[] = false === $at ? '(sans domaine)' : strtolower( substr( $address, $at + 1 ) );
+	}
+
+	$domains = array_values( array_unique( $domains ) );
+	sort( $domains );
+
+	return $domains;
+}
