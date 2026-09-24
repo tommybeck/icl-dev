@@ -20,7 +20,23 @@ Lecture seule sur `staging13.linstantcle.ch`, par le lecteur SQL d'EMCP, tables 
 
 La 1822, Boudoir du 21 au 22 septembre, est annulée et dans le passé.
 
-## Ce qui n'est pas établi
+## Ce qui a réellement été exposé — établi en production le 24 septembre
+
+Le tableau ci-dessus liste les réservations d'essai, pas ce qu'elles ont fermé. Seules trois chambres sont reliées aux plateformes (`sir_vikchannelmanager_roomsxref`) : **L'Entracte et L'Aparté sur les trois, Le Boudoir du Désir sur Airbnb seul**. À Huis Clos n'est sur aucune plateforme. Mais les calendriers partagés de Vik (`sir_vikbooking_calendars_xref`) propagent une réservation à la villa entière : 2 ↔ 4 pour la villa Aparté, 1 ↔ 7 ↔ 10 pour la villa Entracte.
+
+| Réservation d'essai sur | A fermé sur les plateformes |
+|---|---|
+| À Huis Clos, 10 | **L'Entracte**, 1, sur Airbnb, Booking.com et Expedia |
+| Le Boudoir du Désir, 4 | Le Boudoir sur Airbnb, et **L'Aparté**, 2, sur les trois |
+| L'Aparté, 2 | L'Aparté sur les trois, et le Boudoir sur Airbnb |
+
+## Réparation — faite le 24 septembre
+
+Thomas a poussé depuis la production la disponibilité réelle, notification 4033 à 14 h 16 UTC : **L'Aparté et L'Entracte sur Expedia, Booking.com et Airbnb, Le Boudoir sur Airbnb, du 24 septembre 2026 au 24 septembre 2027**, toutes réponses OK. C'est exactement l'ensemble des couples chambre et plateforme existants, sur une période qui couvre toutes les nuits touchées. Vik Channel Manager et MailPoet sont désactivés sur `staging13`, vérifié en base.
+
+**L'incident est clos.** Restent sur la préproduction dix verrous Vik Channel Manager jamais traités et les réservations d'essai : inertes tant que le greffon y reste inactif.
+
+## Ce qui n'était pas établi au moment de la rédaction
 
 Si ces nuits sont **encore** fermées aujourd'hui sur les plateformes. La production ignore ces réservations et n'a aucune raison de rouvrir ces nuits d'elle-même ; une mise à jour ultérieure depuis la production a pu en rouvrir certaines, mais rien ne le garantit. **Une réservation `standby` qui expire ne pousse pas nécessairement de réouverture.**
 
@@ -45,3 +61,4 @@ Deux conséquences à porter au plan :
 | Version | Date | Modification |
 |---|---|---|
 | 1.0 | 2026-09-24 | Création. |
+| 1.1 | 2026-09-24 | Exposition réelle établie par les calendriers partagés : L'Entracte et L'Aparté fermés, À Huis Clos n'étant sur aucune plateforme. Réparation faite et vérifiée, incident clos. |
