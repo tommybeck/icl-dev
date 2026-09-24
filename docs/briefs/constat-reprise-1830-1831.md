@@ -128,6 +128,13 @@ avant toute correction du script** — aucune hypothèse n'a été vérifiée.
 
 ### 3.5 — Annulation refusée en 403, pour la troisième fois
 
+**Correction du 24 septembre, après relecture de `sir_vikbooking_orders` :
+#1830 et #1831 sont `confirmed`.** Le paiement de test a donc abouti, et
+l'hypothèse « encore `standby` » est écartée pour ces deux réservations.
+Le `403` a une autre cause, qui n'est pas encore établie. Le paragraphe
+ci-dessous est conservé tel qu'écrit. Voir `constat-recette-automatisee.md`,
+3.2 bis.
+
 Même code que lors du test de `--nettoyer` sur #1826 et #1827 (chapitre 5 de
 `constat-recette-automatisee.md`). Le message du script liste trois causes
 possibles (réservation encore `standby`, politique d'annulation de Vik,
@@ -194,3 +201,4 @@ Rien de cette liste n'a été entrepris.
 ## Journal des versions
 
 - 24 septembre 2026 — première version, après les reprises de #1830 et #1831.
+- 24 septembre 2026 — 3.5 : #1830 et #1831 sont `confirmed`, l'hypothèse `standby` est écartée pour elles.

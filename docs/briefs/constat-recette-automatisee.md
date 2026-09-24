@@ -191,10 +191,13 @@ d'obtenir un résultat net :
 
 1. **`saveorder()` exige `vbf6`/`vbf7`/`vbf8`** (adresse, code postal,
    localité — `sir_vikbooking_custfields.required = 1`), absents du premier
-   jet. Sans eux, `saveorder()` refuse silencieusement (aucune ligne
-   d'erreur dans le HTML brut) via `showSelectVb('VBINSUFDATA')` et retombe
-   sur la vue de recherche par défaut — un signal que le script rapportait
-   à tort comme « ambigu » plutôt que comme une soumission incomplète. Établi
+   jet. Sans eux, `saveorder()` refuse via `showSelectVb('VBINSUFDATA')` et
+   retombe en `200` sur la vue de recherche par défaut — un signal que le
+   script rapportait à tort comme « ambigu » plutôt que comme une soumission
+   incomplète. **Correction du 24 septembre** : ce refus n'est pas muet.
+   `showSelectVb()` imprime son motif dans un `<p class="err">`
+   (`site/helpers/error_form.php:716-717`), que le premier jet ne lisait pas ;
+   voir 3.2 bis. Établi
    par lecture directe de `site/controller.php` (boucle sur
    `sir_vikbooking_custfields`) après un premier essai réel qui échouait de
    cette façon précise.
@@ -206,7 +209,8 @@ d'obtenir un résultat net :
    discipline que le préfixe Stripe).
 
 Une fois ces deux défauts corrigés, la vérification 3a est **nette et
-reproductible dans les deux sens** : une tentative de réservation de la
+reproductible dans les deux sens** — **sans `--appliquer`** ; avec, voir
+3.2 bis : une tentative de réservation de la
 chambre étrangère active (chambre 2 sous le levier Sexcape Room, chambre 4
 sous le levier L'Instant Clé), menée par le vrai parcours HTTP jusqu'à
 `task=saveorder`, est refusée par un `403` portant le titre exact de
@@ -224,6 +228,112 @@ certitude sur ce que Vik validerait avant d'atteindre notre propre garde, et
 qui aurait mérité sa propre investigation plutôt qu'un raccourci non
 vérifié. La couverture de ce cas précis reste celle des tests unitaires de
 `lme-brands` (`lme_brands_room_is_available()`), déjà verts.
+
+### 3.2 bis — Le « 200 sur `/fr/reserver/` » de la passe L'Instant Clé : la garde n'a jamais été atteinte, le script se heurtait à sa propre réservation
+
+24 septembre 2026, tâche B9h de `plan-de-marche.md`. Lors des exécutions
+avec `--appliquer` du 24 septembre, la vérification 3a de la passe
+L'Instant Clé (chambre 4, Le Boudoir du Désir, sous le levier
+`linstantcle.ch`) rendait un `200` sur `/fr/reserver/`, sans refus et sans
+`sid`, là où la passe Sexcape Room rendait un `403` net. **Cause établie :
+un défaut du script, pas de la garde.** Vik refusait la soumission avant
+que le crochet de la garde ne soit déclenché, parce que la chambre 4 était
+tenue par le verrou temporaire de la réservation d'essai que le script
+venait lui-même de créer, à la même date, dans la passe précédente.
+
+**Le mécanisme, lu dans le code de Vik** (`.local/vikbooking`, Vik Booking
+1.8.14) :
+
+- chaque réservation créée en `standby` pose un verrou dans
+  `sir_vikbooking_tmplock` (`site/controller.php:1583-1603`), valable
+  `minuteslock` minutes (`lib.vikbooking.php:3637`) — **20** sur staging13,
+  lu par sa seule clé ;
+- `saveorder()` interroge ce verrou par `VikBooking::roomNotLocked()`
+  (`controller.php:903`) et, s'il tient, appelle
+  `showSelectVb('VBROOMBOOKEDBYOTHER')` puis `return` (`:909-910`) ;
+- le crochet de la garde, `onBeforeCreateBookingRecord`, n'est déclenché
+  qu'aux lignes **1114** et **1512**, donc jamais atteint ;
+- la recherche et le devis (`search`, `showprc`) ne consultent pas ce
+  verrou : le script obtenait un tarif, allait jusqu'à `saveorder`, et
+  lisait le `200` de la vue d'erreur comme un « signal ambigu ».
+
+**Pourquoi seulement dans ce sens.** Dans `recetter-moteur.sh`, chaque passe
+enchaîne les vérifications 1 à 4, puis 5-6. La passe Sexcape Room, la
+première, réserve pour de vrai sa chambre active, **la 4**, à J+60 (5-6).
+La passe L'Instant Clé, moins d'une minute plus tard, tente en 3a sa chambre
+étrangère, **la 4 aussi**, à **la même date J+60**, dans les 20 minutes du
+verrou. La passe Sexcape Room, elle, tente la chambre 2 avant qu'aucune
+réservation n'existe : elle ne pouvait pas heurter ce verrou. Sans
+`--appliquer`, aucune réservation n'est créée, et la 3a est nette dans les
+deux sens : d'où le constat du 23 septembre (3.2), exact pour ce mode seul.
+
+**Preuves, par le journal de staging13.** Toutes les tentatives sur la
+chambre 4 en passe L'Instant Clé du 22 et du 23 septembre, sans
+`--appliquer`, portent la ligne `foreign_room_booking_attempt` de la garde.
+Les exécutions avec `--appliquer` du 24 septembre (09:36 et 10:34 UTC) n'en
+portent que pour la chambre 2 : **aucune tentative sur la chambre 4 n'a
+atteint la garde ce jour-là**, et chacune suit de quelques secondes la
+création de #1828 puis de #1830, chambre 4, arrivée le 23 novembre. La
+première exécution avec `--appliquer`, le 23 septembre à 20:04, montre la
+même absence juste après #1826.
+
+**Preuve par rejeu, le 24 septembre à 11:10 UTC.** Quatre tentatives menées
+par les fonctions mêmes de `recetter-moteur-vik.sh`, préalables au vert
+(dont `environment: staging`), levier restauré à sa valeur d'entrée :
+
+| Tentative | Levier | Chambre | Arrivée | Résultat | Journal `lme-brands` |
+|---|---|---|---|---|---|
+| A | `linstantcle.ch` | 4 | 7 déc. | **`403`**, « Réservation refusée » | `foreign_room_booking_attempt` |
+| B | `reservation.sexcaperoom.ch` | 4 | 14 déc. | **créée**, #1832, `standby` | — |
+| C | `linstantcle.ch` | 4 | 14 déc. | **`200`** sur `/fr/reserver/`, `<p class="err">` : « Désolé, la chambre a déjà été réservée. Veuillez effectuer une nouvelle réservation. » | **aucune ligne** de la garde |
+| D | `linstantcle.ch` | 4 | 16 déc. | **`403`**, « Réservation refusée » | `foreign_room_booking_attempt` |
+
+C reproduit exactement le signal du plan de marche, et son motif est écrit
+en toutes lettres dans la page. A et D, même levier, même chambre, dates
+sans verrou : la garde refuse. **La garde fonctionne dans les deux sens.**
+Les hypothèses du plan de marche sont écartées l'une et l'autre : ce n'est
+ni une soumission incomplète (`VBINSUFDATA`), ni une garde qui ne se
+déclenche pas — c'est un refus natif de Vik, antérieur à la garde,
+provoqué par le script.
+
+**Correctif du script** (`recetter-moteur-vik.sh`, aucun fichier déployé
+touché) :
+
+1. **Les dates ne se partagent plus.** La 3a vise J+60, la réservation
+   réelle des vérifications 5-6 vise J+90 (`JOURS_VERIF3`,
+   `JOURS_RESERVATION_REELLE`). Une exécution ne peut plus se heurter à
+   elle-même.
+2. **Le refus natif de Vik est lu, jamais pris pour un signal ambigu.**
+   `vik_creer_reservation()` relève le `<p class="err">` de la page et rend
+   le statut `refus_vik`, avec le motif, distinct de `refused_403` (la
+   garde) et de `ambigu` (rien d'identifié).
+3. **La 3a passe au jour suivant** quand Vik refuse avant la garde
+   (`refus_vik`, ou aucun tarif proposé), sur sept dates au plus
+   (`JOURS_VERIF3_ESSAIS`), et rapporte la date qui a conclu. Nécessaire
+   au-delà du point 1 : les réservations d'essai `confirmed` des exécutions
+   précédentes occupent durablement leurs dates, puisque le script ne sait
+   pas les annuler (chapitre 5). Au bout des sept dates, la 3a est rapportée
+   **non concluante**, jamais « OK ».
+
+**Vérifié pour de vrai après correctif**, exécution sans `--appliquer` à
+11:13 UTC : le 23 novembre (J+60) est occupé dans les deux passes, par
+#1830 (chambre 4) et #1831 (chambre 2), toutes deux `confirmed` ; la 3a
+passe au 24 novembre et rend un `403` net dans les deux passes, chacun
+journalisé par la garde (11:13:49 pour la chambre 2, 11:14:37 pour la
+chambre 4). L'extraction du motif a été vérifiée sur la page enregistrée du
+rejeu C, et donne une chaîne vide sur les pages de A et de B. **Non exercé
+après correctif : une exécution complète avec `--appliquer`**, qui aurait
+créé deux réservations d'essai de plus, que le script ne sait pas annuler.
+
+**Une prémisse corrigée au passage.** #1830 et #1831 sont `confirmed` dans
+`sir_vikbooking_orders` : le paiement de test a abouti. Le `403` de leur
+annulation (`constat-reprise-1830-1831.md`, 3.5) ne vient donc pas d'un
+statut `standby`, contrairement à la règle du chapitre 5, qui reste vraie
+pour #1826 à #1829. Cause non établie ici.
+
+**Laissé sur staging13 par ce rejeu :** #1832, chambre 4, 14 décembre,
+`standby`, au nom `RECETTE AUTOMATISEE - NE PAS TRAITER`, inscrite au
+registre local en `standby_sans_paiement`.
 
 ### 3.3 — Aucune réservation de test n'atteint `checkout.stripe.com` sur cette préproduction : le script ne suit pas le lien du bouton PAY NOW
 
@@ -408,4 +518,5 @@ depuis le poste de travail, contre le serveur, par SSH et HTTPS.
 
 | Version | Date | Modification |
 |---|---|---|
+| 1.1 | 2026-09-24 | Chapitre 3.2 bis, tâche B9h : le « 200 sur `/fr/reserver/` » de la passe L'Instant Clé venait du verrou temporaire de Vik (`VBROOMBOOKEDBYOTHER`), posé par la réservation d'essai de la passe Sexcape Room sur la même chambre 4 et à la même date. Il est antérieur à la garde, qui fonctionne dans les deux sens, prouvé par rejeu. Script corrigé : dates séparées, refus natif de Vik lu et distingué, 3a qui passe au jour suivant. 3.2 corrigé : le refus de `showSelectVb()` n'est pas muet. #1830 et #1831 sont `confirmed`. Une réservation d'essai de plus, #1832. |
 | 1.0 | 2026-09-23 | Création. Transcription d'enveloppe écrite et déployée sur `staging13.linstantcle.ch` (70 tests, 0 échec). `recetter-moteur.sh`/`recetter-moteur-vik.sh` écrits puis exécutés pour de vrai à plusieurs reprises contre cette préproduction, corrigeant en cours de route quatre défauts (deux dans le script, chapitre 4 ; un dans la configuration attendue de la recette, chapitre 3.3 ; un défaut de méthode de test sur la vérification 2, l'encodage d'apostrophe). Un vrai défaut de `mu-plugins/lme-brands/includes/room-filter.php` trouvé et documenté (chapitre 3.1), non corrigé ici. Deux réservations de test laissées en `standby` sur `staging13.linstantcle.ch`, non annulables par ce script tant que `skipbtn` n'est pas changé (chapitre 3.3). |

@@ -46,9 +46,10 @@
 # saveorder() refuse toute soumission où l'un des champs marqués
 # `required = 1` ci-dessus est vide (site/controller.php, boucle sur
 # sir_vikbooking_custfields puis showSelectVb('VBINSUFDATA')) et retombe
-# alors, sans aucun message visible dans le HTML brut, sur la vue de
-# recherche par défaut — établi le 23 septembre 2026 après un premier essai
-# réel qui a échoué exactement de cette façon, faute des trois derniers
+# alors, en 200, sur la vue de recherche par défaut, le motif imprimé dans
+# <p class="err"> (site/helpers/error_form.php:716-717) — établi le
+# 23 septembre 2026 après un premier essai réel qui a échoué exactement de
+# cette façon, faute des trois derniers
 # champs ci-dessus (adresse/code postal/localité), jamais devinés depuis le
 # seul rendu de la page oconfirm.
 #
@@ -71,6 +72,22 @@ VBF_CODEPOSTAL_CHAMP="vbf7"
 VBF_LOCALITE_CHAMP="vbf8"
 VBF_CONDITIONS_CHAMP="vbf14"
 GPAYID_STRIPE="3"
+
+# Dates d'essai, en jours à compter d'aujourd'hui (UTC). La vérification 3 et
+# les vérifications 5-6 ne partagent JAMAIS une date : la réservation réelle
+# de la passe Sexcape Room (chambre 4) pose un verrou temporaire de Vik
+# (sir_vikbooking_tmplock, minuteslock = 20 minutes sur staging13) que la
+# vérification 3a de la passe L'Instant Clé, qui vise la même chambre 4,
+# heurtait aux mêmes dates : Vik refusait alors avant la garde
+# (VBROOMBOOKEDBYOTHER), et le script rapportait un « signal ambigu ».
+# Établi le 24 septembre 2026 par rejeu, constat-recette-automatisee.md §3.2 bis.
+JOURS_VERIF3=60
+JOURS_VERIF3_ESSAIS=7          # dates consécutives tentées si Vik refuse avant la garde
+JOURS_RESERVATION_REELLE=90
+
+date_dans_jours() {
+  date -u -v+"$1"d +%Y-%m-%d 2>/dev/null || date -u -d "+$1 days" +%Y-%m-%d
+}
 
 # --------------------------------------------------------------- extraction
 # Aucune bibliothèque HTML en bash : extraction par motif sur des balises
@@ -152,14 +169,15 @@ vik_curl_post_brut() {
 #
 # vik_creer_reservation ROOM_ID CHECKIN(YYYY-MM-DD) NUITS
 #
-# Résultat dans CREATE_STATUT : created | refused_403 | ambigu | erreur
+# Résultat dans CREATE_STATUT : created | refused_403 | refus_vik | ambigu | erreur
 # Sur created : CREATE_SID, CREATE_TS, CREATE_IDORDER, CREATE_REDIRECT_URL,
 #               CREATE_STRIPE_HREF (lien Stripe Checkout relevé dans la page,
 #               vide si absent — voir extraire_href_stripe_wrapper()).
 # Sur refused_403 : CREATE_TITRE (titre de la page wp_die).
+# Sur refus_vik : CREATE_MESSAGE_VIK (texte du <p class="err"> de Vik).
 vik_creer_reservation() {
   local room_id="$1" checkin_iso="$2" nuits="$3"
-  CREATE_STATUT="erreur"; CREATE_SID=""; CREATE_TS=""; CREATE_IDORDER=""; CREATE_REDIRECT_URL=""; CREATE_STRIPE_HREF=""; CREATE_TITRE=""
+  CREATE_STATUT="erreur"; CREATE_SID=""; CREATE_TS=""; CREATE_IDORDER=""; CREATE_REDIRECT_URL=""; CREATE_STRIPE_HREF=""; CREATE_TITRE=""; CREATE_MESSAGE_VIK=""
 
   local checkout_iso checkin_ddmmyyyy checkout_ddmmyyyy
   checkout_iso=$(iso_plus_jours "$checkin_iso" "$nuits")
@@ -281,6 +299,24 @@ vik_creer_reservation() {
   CREATE_REDIRECT_URL="$VIK_LAST_URL"
   CREATE_STRIPE_HREF=$(extraire_href_stripe_wrapper "$page_finale")
 
+  # Refus natif de Vik : saveorder() appelle showSelectVb($err), qui rend la
+  # vue de recherche en 200 et imprime le motif dans <p class="err">
+  # (site/helpers/error_form.php:716-717). Le cas rencontré le 24 septembre
+  # 2026 est VBROOMBOOKEDBYOTHER (site/controller.php:903-910) : la chambre
+  # est tenue par le verrou temporaire (sir_vikbooking_tmplock, minuteslock
+  # minutes) d'une réservation standby aux mêmes dates. Ce refus précède le
+  # crochet de la garde (controller.php:1114 et :1512) : il ne dit rien
+  # d'elle, et n'est donc jamais rapporté ni comme un refus de la garde, ni
+  # comme un signal ambigu.
+  if [ -z "$CREATE_SID" ]; then
+    CREATE_MESSAGE_VIK=$(printf '%s' "$page_finale" | tr -d '\n' | grep -oE '<p class="err">[^<]*' | head -1 | sed 's/^<p class="err">//')
+    if [ -n "$CREATE_MESSAGE_VIK" ]; then
+      jaune "  refus natif de Vik avant la garde (code $VIK_LAST_CODE) : « $CREATE_MESSAGE_VIK »"
+      CREATE_STATUT="refus_vik"
+      return 1
+    fi
+  fi
+
   if [ -z "$CREATE_SID" ]; then
     jaune "  signal ambigu : ni le refus de la garde (403 + titre attendu) ni une redirection portant 'sid' n'ont été observés"
     jaune "  code $VIK_LAST_CODE, URL finale : $VIK_LAST_URL"
@@ -368,13 +404,32 @@ verif3_garde_reservation() {
   local marque="$1" room_etranger="$2" nom_etranger="$3" room_desactivee="$4"
   titre "Vérification 3 — garde de réservation ($marque)"
 
-  local dans_60j; dans_60j=$(date -u -v+60d +%Y-%m-%d 2>/dev/null || date -u -d '+60 days' +%Y-%m-%d)
+  local dans_60j; dans_60j=$(date_dans_jours "$JOURS_VERIF3")
 
-  vik_creer_reservation "$room_etranger" "$dans_60j" 1
+  # 3a ne met la garde à l'épreuve que si Vik laisse la soumission aller
+  # jusqu'à elle. Un refus natif antérieur (chambre verrouillée ou occupée à
+  # cette date : refus_vik, ou aucun tarif proposé : erreur) ne dit rien de la
+  # garde : on passe au jour suivant, jamais on ne conclut dessus.
+  local essai date_3a
+  for essai in $(seq 0 $((JOURS_VERIF3_ESSAIS - 1))); do
+    date_3a=$(date_dans_jours $((JOURS_VERIF3 + essai)))
+    vik_creer_reservation "$room_etranger" "$date_3a" 1
+    case "$CREATE_STATUT" in
+      refus_vik|erreur)
+        info "  3a : Vik refuse avant la garde à l'arrivée $date_3a (statut '$CREATE_STATUT') — jour suivant"
+        continue ;;
+    esac
+    break
+  done
+
   case "$CREATE_STATUT" in
     refused_403)
-      vert "  OK   chambre étrangère (#$room_etranger, $nom_etranger) refusée : 403, '$CREATE_TITRE'"
-      noter "3a OK  chambre étrangère refusée"
+      vert "  OK   chambre étrangère (#$room_etranger, $nom_etranger) refusée : 403, '$CREATE_TITRE' (arrivée $date_3a)"
+      noter "3a OK  chambre étrangère refusée (arrivée $date_3a)"
+      ;;
+    refus_vik|erreur)
+      jaune "  3a non concluant : Vik a refusé avant la garde sur $JOURS_VERIF3_ESSAIS dates consécutives à partir de J+$JOURS_VERIF3"
+      noter "3a ??  non concluant (Vik refuse avant la garde, $JOURS_VERIF3_ESSAIS dates)"
       ;;
     created)
       rouge "  KO   chambre étrangère (#$room_etranger) acceptée : réservation #$CREATE_IDORDER créée — FUITE DE MARQUE"
@@ -414,10 +469,10 @@ verif5_6_reservation_reelle() {
   local marque="$1" room_id="$2"
   titre "Vérifications 5-6 — réservation réelle ($marque, chambre #$room_id)"
 
-  local dans_60j; dans_60j=$(date -u -v+60d +%Y-%m-%d 2>/dev/null || date -u -d '+60 days' +%Y-%m-%d)
+  local date_reelle; date_reelle=$(date_dans_jours "$JOURS_RESERVATION_REELLE")
   local log_offset; log_offset=$(remote_call debug-log-offset)
 
-  vik_creer_reservation "$room_id" "$dans_60j" 1
+  vik_creer_reservation "$room_id" "$date_reelle" 1
 
   if [ "$CREATE_STATUT" != "created" ]; then
     rouge "  KO   la réservation d'essai n'a pas pu être créée (statut '$CREATE_STATUT')"
