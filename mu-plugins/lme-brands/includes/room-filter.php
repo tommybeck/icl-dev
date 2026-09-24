@@ -20,9 +20,11 @@
  *     Huis Clos. On ne peut donc pas filtrer un résultat qui n'existe pas
  *     encore ; on retire l'anomalie à sa source, en supprimant de la
  *     requête tout paramètre qui viserait une chambre étrangère à la
- *     marque de l'hôte, avant que le shortcode ne lise `$_REQUEST`
- *     (`vikbooking.php:265-273` : `$input = $app->input` est lié par
- *     référence à `$_REQUEST`, `JInput::__construct()`). Une fois le
+ *     marque de l'hôte, avant que Vik ne lise `$_REQUEST` — c'est-à-dire
+ *     avant son pré-traitement sur `init`, pas seulement avant le
+ *     shortcode (voir la couche 1b ci-dessous). `$app->input` est lié par
+ *     référence à `$_REQUEST` (`JInput::__construct()`), et les vues lisent
+ *     par `VikRequest::getString|getInt|getVar(…, 'request')`. Une fois le
  *     paramètre retiré, `def()` applique le véritable défaut du
  *     shortcode — celui que la page a été construite pour montrer.
  *
@@ -80,12 +82,19 @@ function lme_brands_filter_search_results( $value, $room, $result_filters ) {
 
 // --- Couche 1b : vues sans hook natif ---------------------------------------
 //
-// Placé sur `template_redirect`, priorité 0 : Vik exécute son shortcode
-// pendant le rendu du contenu (`the_content`), donc bien après. Le même
-// hook est utilisé par le précédent api-host.php pour verrouiller
-// api.linstantcle.ch (constat-perimetre-tunnel.md §1), à la même priorité.
+// Placé sur `init`, priorité 1. Vik ne rend pas sa vue pendant
+// `the_content` : sur une page portant son shortcode, sa propre clôture
+// `init` de priorité 10 (`vikbooking.php:152`, VIKBOOKING_SITE_PREPROCESS)
+// injecte les attributs du shortcode par `def()` puis appelle
+// `VikBookingBody::process()`, qui exécute le contrôleur et met le HTML en
+// réserve ; le shortcode ne fait ensuite que restituer cette réserve.
+// Établi par trace d'exécution le 24 septembre 2026
+// (constat-correctif-room-filter.md) : l'ancien accrochage sur
+// `template_redirect` retirait bien le paramètre, mais une fois la vue déjà
+// rendue. Priorité 1, avant ce `def()` : le paramètre étranger retiré, c'est
+// le défaut du shortcode, la chambre de la page, que Vik injecte.
 
-add_action( 'template_redirect', 'lme_brands_enforce_shortcode_room_scope', 0 );
+add_action( 'init', 'lme_brands_enforce_shortcode_room_scope', 1 );
 
 function lme_brands_enforce_shortcode_room_scope() {
 	if ( is_admin() ) {
@@ -102,6 +111,84 @@ function lme_brands_enforce_shortcode_room_scope() {
 	lme_brands_strip_foreign_single_room( 'roomid', $expected_brand );      // roomdetails
 	lme_brands_strip_foreign_room_list( 'room_ids', $expected_brand );      // availability
 	lme_brands_strip_foreign_category( 'category_id', $expected_brand );   // roomslist
+	lme_brands_strip_foreign_listing_view( $expected_brand );               // availability, roomslist
+}
+
+/**
+ * Vues de liste demandées par la requête : `?view=availability` ou
+ * `?view=roomslist` ajouté à l'URL de n'importe quelle page Vik remplace la
+ * vue de la page (le `def()` de Vik cède devant la requête, comme pour
+ * `roomid`). Sans sélection, ces deux vues listent toutes les chambres
+ * actives, les deux marques confondues (`site/views/availability/view.html.php:37`,
+ * `site/views/roomslist/view.html.php:55`), et aucune n'a de crochet de
+ * filtrage. Retirer `room_ids` ou `category_id` ne suffit donc pas : c'est
+ * précisément ce qui fait lister toutes les chambres.
+ *
+ * La vue demandée n'est gardée que si la sélection restante, après les
+ * retraits ci-dessus, désigne au moins une chambre et uniquement des
+ * chambres de la marque de l'hôte. Sinon le paramètre `view` est retiré, et
+ * la page retombe sur sa propre vue, celle de son shortcode. Constat du
+ * 24 septembre 2026 : aucune page publiée ne porte nativement l'une de ces
+ * deux vues (constat-correctif-room-filter.md).
+ *
+ * @param string $expected_brand
+ */
+function lme_brands_strip_foreign_listing_view( $expected_brand ) {
+	if ( ! isset( $_REQUEST['view'] ) || ! is_string( $_REQUEST['view'] ) ) {
+		return;
+	}
+
+	// Normalisé comme le filtre `cmd` de Vik (`libraries/adapter/input/filter.php:191`,
+	// caractères hors de A-Z, 0-9, `_`, `.`, `-` retirés, points de tête ôtés),
+	// puis en minuscules : `view=availability%20` rend bien la vue availability,
+	// constaté le 24 septembre 2026. Comparer la valeur brute la laissait passer.
+	$view = strtolower( ltrim( (string) preg_replace( '/[^A-Z0-9_.-]/i', '', $_REQUEST['view'] ), '.' ) );
+
+	if ( 'availability' === $view ) {
+		$room_ids = isset( $_REQUEST['room_ids'] ) ? lme_brands_parse_id_list( $_REQUEST['room_ids'] ) : array();
+	} elseif ( 'roomslist' === $view ) {
+		$category_id = isset( $_REQUEST['category_id'] ) && ! is_array( $_REQUEST['category_id'] ) ? (int) $_REQUEST['category_id'] : 0;
+		$room_ids    = $category_id > 0
+			? lme_brands_room_ids_matching_category( lme_brands_room_category_tokens(), $category_id )
+			: array();
+	} else {
+		return;
+	}
+
+	$foreign_room = null;
+
+	foreach ( $room_ids as $room_id ) {
+		$resolved = lme_brands_resolve_room_or_log( $room_id );
+
+		if ( 'ok' !== $resolved['status'] || $resolved['brand_key'] !== $expected_brand ) {
+			$foreign_room = $room_id;
+			break;
+		}
+	}
+
+	if ( array() !== $room_ids && null === $foreign_room ) {
+		return;
+	}
+
+	lme_brands_log(
+		'warning',
+		'foreign_view_param_stripped',
+		sprintf(
+			"Paramètre 'view=%s' retiré de la requête : %s. La page retombe sur la vue de son shortcode.",
+			$view,
+			null === $foreign_room
+				? 'sans sélection, la vue listerait les chambres de toutes les marques'
+				: sprintf( "la sélection contient la chambre #%d, hors de la marque de l'hôte courant (%s)", $foreign_room, $expected_brand )
+		),
+		array(
+			'view'           => $view,
+			'room_ids'       => $room_ids,
+			'foreign_room'   => $foreign_room,
+			'expected_brand' => $expected_brand,
+		)
+	);
+
+	lme_brands_strip_request_param( 'view' );
 }
 
 /**
@@ -258,6 +345,18 @@ function lme_brands_strip_foreign_category( $param, $expected_brand ) {
  */
 function lme_brands_strip_request_param( $name ) {
 	unset( $_GET[ $name ], $_POST[ $name ], $_REQUEST[ $name ] );
+
+	if ( did_action( 'vikbooking_before_dispatch' ) ) {
+		// Le contrôleur de Vik a déjà rendu sa vue : le retrait arrive trop
+		// tard et ne change rien à la page. C'est exactement le défaut que
+		// l'accrochage sur `template_redirect` produisait en silence.
+		lme_brands_log(
+			'error',
+			'foreign_room_param_stripped_too_late',
+			sprintf( "Paramètre '%s' retiré après le rendu de la vue Vik : la page propose peut-être encore la chambre étrangère.", $name ),
+			array( 'param' => $name )
+		);
+	}
 }
 
 /**

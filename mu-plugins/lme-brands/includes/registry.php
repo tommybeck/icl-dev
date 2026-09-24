@@ -191,7 +191,7 @@ function lme_brands_current_raw_http_host() {
  * endroits casserait l'administration), cette fonction ne fait aucune
  * exclusion de contexte. Le filtrage de présentation et la garde de
  * réservation n'en ont pas besoin : ils ne s'exécutent de toute façon que
- * sur des requêtes front-end réelles (template_redirect, ou le hook de
+ * sur des requêtes front-end réelles (`init` hors administration, ou le hook de
  * création de réservation, qui ne se déclenche jamais en administration).
  *
  * Un hôte qui n'est celui d'aucune marque du registre (staging, accès

@@ -135,6 +135,8 @@ révélé au premier lancement, chapitre 4.1).
 
 ### 3.1 — Un vrai défaut de `room-filter.php` (vérification 2), reproductible dans les deux sens
 
+> **Cause établie et corrigée le 24 septembre 2026**, `constat-correctif-room-filter.md` : Vik rend la vue pendant `init`, avant le `template_redirect` où `room-filter.php` retirait le paramètre. L'hypothèse ci-dessous, « un autre chemin de lecture », était fausse : le chemin est bien `$app->input` → `$_REQUEST` ; c'est le moment qui l'était. La vérification 2 porte désormais sur les identifiants de chambre du conteneur Vik, plus sur le nom dans la page.
+
 Sous le levier Sexcape Room, `https://staging13.linstantcle.ch/en/le-boudoir-du-desir/?view=roomdetails&roomid=2&tmpl=component`
 rend intégralement la fiche de **L'Aparté** (chambre 2, marque L'Instant Clé)
 — nom, catégorie, description — dans le bloc `vbo-room-details-wrap` de
@@ -518,5 +520,6 @@ depuis le poste de travail, contre le serveur, par SSH et HTTPS.
 
 | Version | Date | Modification |
 |---|---|---|
+| 1.2 | 2026-09-24 | Chapitre 3.1, tâche B11 : cause établie par trace d'exécution et corrigée, vérification 2 refaite sur les identifiants de chambre du conteneur Vik. Renvoi vers `constat-correctif-room-filter.md`. |
 | 1.1 | 2026-09-24 | Chapitre 3.2 bis, tâche B9h : le « 200 sur `/fr/reserver/` » de la passe L'Instant Clé venait du verrou temporaire de Vik (`VBROOMBOOKEDBYOTHER`), posé par la réservation d'essai de la passe Sexcape Room sur la même chambre 4 et à la même date. Il est antérieur à la garde, qui fonctionne dans les deux sens, prouvé par rejeu. Script corrigé : dates séparées, refus natif de Vik lu et distingué, 3a qui passe au jour suivant. 3.2 corrigé : le refus de `showSelectVb()` n'est pas muet. #1830 et #1831 sont `confirmed`. Une réservation d'essai de plus, #1832. |
 | 1.0 | 2026-09-23 | Création. Transcription d'enveloppe écrite et déployée sur `staging13.linstantcle.ch` (70 tests, 0 échec). `recetter-moteur.sh`/`recetter-moteur-vik.sh` écrits puis exécutés pour de vrai à plusieurs reprises contre cette préproduction, corrigeant en cours de route quatre défauts (deux dans le script, chapitre 4 ; un dans la configuration attendue de la recette, chapitre 3.3 ; un défaut de méthode de test sur la vérification 2, l'encodage d'apostrophe). Un vrai défaut de `mu-plugins/lme-brands/includes/room-filter.php` trouvé et documenté (chapitre 3.1), non corrigé ici. Deux réservations de test laissées en `standby` sur `staging13.linstantcle.ch`, non annulables par ce script tant que `skipbtn` n'est pas changé (chapitre 3.3). |

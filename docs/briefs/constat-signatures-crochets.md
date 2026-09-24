@@ -91,6 +91,8 @@ correspondance exacte, aucune troncature, aucun déficit.
 
 ## 2. `template_redirect`
 
+> **Note du 24 septembre 2026.** Ce crochet n'est plus utilisé : l'accrochage est passé sur `init`, priorité 1, parce que Vik rend la vue dès son propre `init` de priorité 10, avant `template_redirect`. `init` se déclenche lui aussi par `do_action( 'init' )`, sans argument : la signature à zéro paramètre reste juste. Voir `constat-correctif-room-filter.md`.
+
 **Fichier :** `includes/room-filter.php:88`, `add_action( 'template_redirect', 'lme_brands_enforce_shortcode_room_scope', 0 )`.
 
 **Appel côté WordPress :** `wp-includes/template-loader.php:23` —

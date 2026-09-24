@@ -317,6 +317,26 @@ case "$MODE" in
     exit 0
     ;;
 
+  room-brands)
+    # Marque de chaque chambre du registre de lme-brands, sous la forme
+    # id:empreinte_hex — la seule source de la correspondance chambre/marque,
+    # jamais recopiée dans ce script. bin2hex() : même précaution que
+    # resolve-brand-key contre TranslatePress.
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    wp eval '$c = lme_brands_get_config(); foreach ( array_keys( (array) $c["rooms"] ) as $id ) { $r = lme_brands_resolve_room( $c, $id ); if ( "ok" === $r["status"] ) { echo (int) $id, ":", bin2hex( $r["brand_key"] ), "\n"; } }' --path="$BASE" 2>/dev/null
+    exit 0
+    ;;
+
+  room-pages)
+    # Page de chaque vue roomdetails : roomid, post_id, post_name, tels que
+    # Vik les tient dans sa table des shortcodes pour construire ses liens.
+    # Données structurelles, non secrètes.
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    Q="SELECT JSON_UNQUOTE(JSON_EXTRACT(s.json, '\$.roomid')), s.post_id, p.post_name FROM sir_vikbooking_wpshortcodes s JOIN sir_posts p ON p.ID = s.post_id WHERE s.type = 'roomdetails' AND s.post_id > 0"
+    wp db query "$Q" --path="$BASE" --skip-column-names 2>/dev/null
+    exit 0
+    ;;
+
   vikstripe-test-keys)
     # Même geste que deployer-moteur.sh : LEFT(...,8) posé par la requête SQL
     # elle-même, jamais la clé, jamais son chargement en mémoire côté script.
@@ -487,68 +507,227 @@ verif1_resolution_marque() {
 }
 
 # ============================================================ vérification 2
-# Requête sur les quatre vues publiques (search, roomdetails, availability,
-# roomslist) avec un identifiant de chambre étrangère à la marque du levier
-# actif, assertion d'absence du nom de la chambre étrangère dans la réponse.
-verif2_fetch_contient() {
-  # $1 = url, $2 = motif (sous-chaîne littérale, sans apostrophe : les noms
-  # de chambre qui en portent une sont rendus tantôt avec une apostrophe
-  # simple, tantôt avec l'entité HTML &#8217; selon la vue — établi le
-  # 23 septembre 2026, jamais supposé. Ne jamais passer un motif contenant
-  # une apostrophe à cette fonction.
-  local url="$1" motif="$2" body
-  body=$(curl -s -L --max-time 15 "$url")
-  [[ "$body" == *"$motif"* ]]
+# Ce qui est mesuré : les identifiants de chambre que le composant de Vik
+# propose, relevés dans son seul conteneur (`div.plugin-container`, un par
+# page, établi le 24 septembre 2026) — jamais le nom d'une chambre dans la
+# page entière. La préproduction est une copie de linstantcle.ch, dont le
+# menu nomme les chambres sur chaque page : chercher un nom dans toute la
+# page rendait le KO garanti par construction (constat-correctif-room-filter.md).
+#
+# Identifiants relevés dans le conteneur :
+#   - champs de formulaire `roomdetail`, `roomid`, `room_ids[]`, `roomopt[]` ;
+#   - résultats de recherche, `vbSelectRoom('n', 'idroom')` ;
+#   - paramètres `roomid` / `roomdetail` des liens ;
+#   - chaque résultat de `roomslist` (`li.room_result`), dont le lien ne porte
+#     pas d'identifiant : il est rapporté à sa chambre par la table des
+#     shortcodes de Vik (page d'une vue roomdetails -> son roomid), la même
+#     correspondance que Vik utilise pour construire ce lien.
+#
+# La marque de chaque identifiant est résolue sur le serveur par le registre
+# de lme-brands (lme_brands_resolve_room()), jamais par une liste tenue ici.
+# Un identifiant absent du registre compte comme étranger.
+#
+# Témoin d'abord : la page propre, sans paramètre, doit proposer sa propre
+# chambre et elle seule. Sans témoin vert, la mesure n'est pas jugée.
+VERIF2_JOURS_RECHERCHE=75   # hors des dates des vérifications 3 (60) et 5-6 (90)
+VERIF2_MARQUES=""           # lignes id:empreinte_hex_de_la_marque
+VERIF2_PAGES_FICHIER="$ETAT_DIR/verif2-pages-vik.tsv"
+
+read -r -d '' VERIF2_EXTRACTEUR <<'PHP_EOF'
+<?php
+// $argv[1] : page HTML ; $argv[2] : roomid<TAB>post_id<TAB>post_name.
+// Imprime « CONTENEURS n », puis une ligne « id origine » par identifiant,
+// ou « ? origine » pour un résultat qu'aucune page de chambre ne rapporte.
+$pages = array();
+foreach ( (array) @file( $argv[2], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES ) as $l ) {
+	$c = explode( "\t", $l );
+	if ( count( $c ) >= 3 && ctype_digit( $c[0] ) ) {
+		$pages[ 'id:' . $c[1] ]   = $c[0];
+		$pages[ 'slug:' . $c[2] ] = $c[0];
+	}
+}
+libxml_use_internal_errors( true );
+$doc = new DOMDocument();
+$doc->loadHTML( '<?xml encoding="UTF-8">' . (string) @file_get_contents( $argv[1] ) );
+$xp  = new DOMXPath( $doc );
+$box = $xp->query( "//div[contains(concat(' ', normalize-space(@class), ' '), ' plugin-container ')]" );
+echo 'CONTENEURS ', $box->length, "\n";
+$out = array();
+foreach ( $box as $c ) {
+	foreach ( $xp->query( ".//input[@name='roomdetail' or @name='roomid' or @name='room_ids[]' or @name='roomopt[]']", $c ) as $in ) {
+		$v = trim( $in->getAttribute( 'value' ) );
+		if ( '' !== $v && ctype_digit( $v ) ) {
+			$out[] = $v . ' champ:' . $in->getAttribute( 'name' );
+		}
+	}
+	if ( preg_match_all( "/vbSelectRoom\\(\\s*'[0-9]+'\\s*,\\s*'([0-9]+)'\\s*\\)/", $doc->saveHTML( $c ), $m ) ) {
+		foreach ( $m[1] as $v ) {
+			$out[] = $v . ' resultat-recherche';
+		}
+	}
+	foreach ( $xp->query( './/a[@href]', $c ) as $a ) {
+		parse_str( (string) parse_url( $a->getAttribute( 'href' ), PHP_URL_QUERY ), $q );
+		foreach ( array( 'roomid', 'roomdetail' ) as $k ) {
+			if ( isset( $q[ $k ] ) && is_string( $q[ $k ] ) && ctype_digit( $q[ $k ] ) ) {
+				$out[] = $q[ $k ] . ' lien:' . $k;
+			}
+		}
+	}
+	foreach ( $xp->query( ".//li[contains(concat(' ', normalize-space(@class), ' '), ' room_result ')]", $c ) as $li ) {
+		$a = $xp->query( './/a[@href]', $li )->item( 0 );
+		$h = $a ? $a->getAttribute( 'href' ) : '';
+		parse_str( (string) parse_url( $h, PHP_URL_QUERY ), $q );
+		$slug = basename( rtrim( (string) parse_url( $h, PHP_URL_PATH ), '/' ) );
+		if ( isset( $q['page_id'] ) && isset( $pages[ 'id:' . $q['page_id'] ] ) ) {
+			$out[] = $pages[ 'id:' . $q['page_id'] ] . ' liste:page_id';
+		} elseif ( '' !== $slug && isset( $pages[ 'slug:' . $slug ] ) ) {
+			$out[] = $pages[ 'slug:' . $slug ] . ' liste:page';
+		} else {
+			$out[] = '? liste:' . ( '' !== $h ? $h : 'sans-lien' );
+		}
+	}
+}
+echo implode( "\n", array_unique( $out ) ), "\n";
+PHP_EOF
+
+verif2_charger_references() {
+  [ -n "$VERIF2_MARQUES" ] && [ -s "$VERIF2_PAGES_FICHIER" ] && return 0
+  VERIF2_MARQUES=$(remote_call room-brands | grep -E '^[0-9]+:[0-9a-f]+$')
+  remote_call room-pages | grep -E $'^[0-9]+\t[0-9]+\t' > "$VERIF2_PAGES_FICHIER"
+  [ -n "$VERIF2_MARQUES" ] && [ -s "$VERIF2_PAGES_FICHIER" ]
+}
+
+verif2_marque_de() {
+  local hex; hex=$(printf '%s\n' "$VERIF2_MARQUES" | sed -n "s/^$1://p" | head -1)
+  printf '%s' "${hex:--}"
+}
+
+# verif2_classer FICHIER EMPREINTE_MARQUE -> une ligne « ETAT ids_propres ids_etrangers »
+# ETAT ∈ { SANS_CONTENEUR, AUCUN, PROPRE, ETRANGER, NON_RAPPORTE }
+verif2_classer() {
+  local fichier="$1" attendu="$2" brut n_conteneurs ligne id propres="" etrangers="" non_rapporte=0
+  brut=$(php -- "$fichier" "$VERIF2_PAGES_FICHIER" <<< "$VERIF2_EXTRACTEUR")
+  n_conteneurs=$(printf '%s\n' "$brut" | sed -n 's/^CONTENEURS //p')
+  if [ "${n_conteneurs:-0}" -eq 0 ]; then
+    echo "SANS_CONTENEUR - -"; return
+  fi
+  while IFS= read -r ligne; do
+    case "$ligne" in CONTENEURS*|"") continue ;; esac
+    id="${ligne%% *}"
+    if [ "$id" = "?" ]; then non_rapporte=1; continue; fi
+    if [ "$(verif2_marque_de "$id")" = "$attendu" ]; then
+      case " $propres " in *" $id "*) ;; *) propres="${propres:+$propres }$id" ;; esac
+    else
+      case " $etrangers " in *" $id "*) ;; *) etrangers="${etrangers:+$etrangers }$id" ;; esac
+    fi
+  done <<< "$brut"
+  propres="${propres// /,}"
+  if [ -n "$etrangers" ]; then echo "ETRANGER ${propres:--} ${etrangers// /,}"
+  elif [ "$non_rapporte" -eq 1 ]; then echo "NON_RAPPORTE ${propres:--} -"
+  elif [ -n "$propres" ]; then echo "PROPRE $propres -"
+  else echo "AUCUN - -"
+  fi
+}
+
+# verif2_lire FICHIER URL [champ=valeur ...] : GET sans champ, POST sinon.
+verif2_lire() {
+  local fichier="$1" url="$2"; shift 2
+  if [ $# -eq 0 ]; then
+    curl -s -L --max-time 30 -o "$fichier" "$url"
+  else
+    local -a args=(); local champ
+    for champ in "$@"; do args+=(--data-urlencode "$champ"); done
+    curl -s -L --max-time 30 -X POST "${args[@]}" -o "$fichier" "$url"
+  fi
 }
 
 verif2_vues_publiques() {
-  local marque="$1" page_propre="$2" room_id_etranger="$3" motif_etranger="$4"
-  titre "Vérification 2 — quatre vues publiques ($marque), chambre étrangère #$room_id_etranger ($motif_etranger)"
+  local marque="$1" page_propre="$2" room_propre="$3" room_etranger="$4"
+  titre "Vérification 2 — quatre vues publiques ($marque), chambre étrangère #$room_etranger"
 
-  local base="https://$HOTE/en/$page_propre/"
+  if ! verif2_charger_references; then
+    rouge "  KO   correspondances du registre ou des pages Vik illisibles : mesure impossible"
+    noter "2  ??  ($marque) mesure impossible, registre ou table des shortcodes illisible"
+    return
+  fi
+
+  local attendu; attendu=$(printf '%s' "$marque" | od -An -tx1 | tr -d ' \n')
+  local fichier="$ETAT_DIR/verif2-page.html"
+
+  # URL finale de la page propre : WordPress redirige /en/<slug>/ vers son
+  # chemin canonique par un 301, que curl -L suivrait en GET et qui ferait
+  # perdre le POST de la recherche.
+  local page
+  page=$(curl -s -L --max-time 30 -o /dev/null -w '%{url_effective}' "https://$HOTE/en/$page_propre/")
+  page="${page%%\?*}"
+
+  # Témoin : la page sans paramètre propose sa chambre, et elle seule.
+  local temoin etat propres etrangers
+  verif2_lire "$fichier" "${page}?_r=t-$$"
+  temoin=$(verif2_classer "$fichier" "$attendu")
+  read -r etat propres etrangers <<< "$temoin"
+  if [ "$etat" != "PROPRE" ] || [ "$propres" != "$room_propre" ]; then
+    rouge "  ??   témoin : la page propre sans paramètre ne se mesure pas comme attendu ($etat, propres=$propres, étrangers=$etrangers, chambre attendue #$room_propre)"
+    noter "2  ??  ($marque) témoin non conforme ($etat) : mesure non jugée"
+    return
+  fi
+  vert "  OK   témoin : page propre, chambre #$room_propre et elle seule"
+
+  local ci co
+  ci=$(iso_vers_ddmmyyyy "$(date_dans_jours "$VERIF2_JOURS_RECHERCHE")")
+  co=$(iso_vers_ddmmyyyy "$(date_dans_jours $((VERIF2_JOURS_RECHERCHE + 1)))")
+
   local -a vues=(
-    "roomdetails|roomid=$room_id_etranger"
-    "availability|room_ids=$room_id_etranger"
-    "roomslist|category_id=$room_id_etranger"
-    "search|"
+    "roomdetails, roomid étranger|view=roomdetails&roomid=$room_etranger|"
+    "availability, room_ids étranger|view=availability&room_ids=$room_etranger|"
+    "availability, sans sélection|view=availability|"
+    "roomslist, category_id=$room_etranger|view=roomslist&category_id=$room_etranger|"
+    "roomslist, sans sélection|view=roomslist|"
+    "search, roomdetail étranger||option=com_vikbooking task=search checkindate=$ci checkinh=15 checkinm=0 checkoutdate=$co checkouth=11 checkoutm=0 roomsnum=1 adults[]=2 roomdetail=$room_etranger"
   )
-  local entry vue param url all_ok=1 une_seule_fois=0
+  local entry libelle requete champs url all_ok=1 inconstant=0 non_mesure=0 premiere seconde
   for entry in "${vues[@]}"; do
-    vue="${entry%%|*}"; param="${entry#*|}"
-    url="${base}?view=${vue}&tmpl=component"
-    [ -n "$param" ] && url="${url}&${param}"
+    libelle="${entry%%|*}"; requete="${entry#*|}"; champs="${requete#*|}"; requete="${requete%%|*}"
+    url="${page}?${requete:+$requete&}_r="
 
-    # Deux lectures, jamais une seule : CLAUDE.md règle absolue n°4, « le
-    # cache est le premier suspect devant un comportement inexpliqué en
-    # frontal ». Une réponse qui change entre deux requêtes identiques,
-    # quelques secondes d'écart, avec un paramètre anti-cache différent à
-    # chaque fois, pointe vers NitroPack ou le cache dynamique SiteGround
-    # plutôt que vers ce greffon — et ne doit jamais se rapporter comme un
-    # défaut confirmé de la garde.
-    local premiere seconde
-    premiere=$(verif2_fetch_contient "${url}&_r=1-$$" "$motif_etranger" && echo 1 || echo 0)
+    # Deux lectures, jamais une seule : règle absolue n°4 de CLAUDE.md. Deux
+    # résultats différents à quelques secondes d'écart pointent vers un cache,
+    # pas vers ce greffon, et ne se rapportent pas comme un défaut.
+    local -a champs_post=()
+    [ -n "$champs" ] && read -r -a champs_post <<< "$champs"
+    verif2_lire "$fichier" "${url}1-$$" ${champs_post[@]+"${champs_post[@]}"}; premiere=$(verif2_classer "$fichier" "$attendu")
     sleep 2
-    seconde=$(verif2_fetch_contient "${url}&_r=2-$$" "$motif_etranger" && echo 1 || echo 0)
+    verif2_lire "$fichier" "${url}2-$$" ${champs_post[@]+"${champs_post[@]}"}; seconde=$(verif2_classer "$fichier" "$attendu")
 
-    if [ "$premiere" = "0" ] && [ "$seconde" = "0" ]; then
-      vert "  OK   vue $vue : aucune trace de '$motif_etranger' (deux lectures concordantes)"
-    elif [ "$premiere" = "1" ] && [ "$seconde" = "1" ]; then
-      rouge "  KO   vue $vue : '$motif_etranger' apparaît dans les deux lectures"
+    read -r etat propres etrangers <<< "$premiere"
+    if [ "$premiere" != "$seconde" ]; then
+      jaune "  ??   $libelle : deux lectures discordantes ($premiere / $seconde)"
+      jaune "       purger NitroPack puis le cache dynamique SiteGround et rejouer (règle absolue n°4)"
+      inconstant=1
+    elif [ "$etat" = "ETRANGER" ]; then
+      rouge "  KO   $libelle : chambre(s) étrangère(s) #${etrangers//,/, #} proposée(s) par Vik (propres : $propres)"
       all_ok=0
+    elif [ "$etat" = "PROPRE" ]; then
+      vert "  OK   $libelle : Vik ne propose que #${propres//,/, #}"
+    elif [ "$etat" = "AUCUN" ] && [ -z "$champs" ]; then
+      vert "  OK   $libelle : aucune chambre proposée"
     else
-      jaune "  ??   vue $vue : résultat inconstant entre deux requêtes identiques (1re=$premiere, 2e=$seconde)"
-      jaune "       comportement inexpliqué en frontal : purger NitroPack puis le cache dynamique SiteGround"
-      jaune "       et rejouer avant de conclure (règle absolue n°4 de CLAUDE.md) — ni compté OK ni KO ici"
-      une_seule_fois=1
+      # SANS_CONTENEUR, NON_RAPPORTE, ou une recherche sans aucun résultat :
+      # rien d'étranger n'a été vu, mais rien de propre non plus — la vue
+      # n'est pas mesurée, et ne compte pas comme OK.
+      jaune "  ??   $libelle : non mesurée ($etat)"
+      non_mesure=1
     fi
   done
 
-  if [ "$une_seule_fois" -eq 1 ]; then
+  if [ "$all_ok" -eq 0 ]; then
+    noter "2  KO  au moins une vue publique ($marque) propose la chambre étrangère #$room_etranger, de façon reproductible"
+  elif [ "$inconstant" -eq 1 ]; then
     noter "2  ??  ($marque) au moins une vue inconstante entre deux lectures — purger les caches et rejouer avant conclusion"
-  elif [ "$all_ok" -eq 1 ]; then
-    noter "2  OK  quatre vues publiques ($marque) : aucune fuite de '$motif_etranger'"
+  elif [ "$non_mesure" -eq 1 ]; then
+    noter "2  ??  ($marque) aucune fuite vue, mais au moins une vue non mesurée"
   else
-    noter "2  KO  au moins une vue publique ($marque) a laissé passer '$motif_etranger', de façon reproductible"
+    noter "2  OK  quatre vues publiques ($marque) : Vik ne propose aucune chambre étrangère"
   fi
 }
 
@@ -658,7 +837,7 @@ for PASSE in sexcaperoom linstantcle; do
   set_override "$OVERRIDE_HOST"
 
   verif1_resolution_marque "$PASSE"
-  verif2_vues_publiques "$PASSE" "$PAGE_PROPRE" "$ROOM_ETRANGER" "$NOM_ETRANGER"
+  verif2_vues_publiques "$PASSE" "$PAGE_PROPRE" "$ROOM_ACTIVE" "$ROOM_ETRANGER"
   verif3_garde_reservation "$PASSE" "$ROOM_ETRANGER" "$NOM_ETRANGER" "$ROOM_DESACTIVEE"
   verif4_apparence "$PASSE" "$ATTENDU_SRLM"
 
