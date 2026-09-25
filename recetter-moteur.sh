@@ -23,24 +23,37 @@
 #                           après --reprise, la vérification 7. Sans cette
 #                           option : seules les vérifications 1, 2, 3, 4 et 8
 #                           tournent — aucune ne crée quoi que ce soit.
-#   --reprise IDORDER       reprend une réservation d'essai laissée en attente
-#                           à la redirection Stripe (voir chapitre 4 du brief) :
-#                           relit la confirmation, la transcription d'enveloppe
-#                           (vérification 5), les journaux de paiement
-#                           (vérification 6), déclenche le rappel avant séjour
-#                           (vérification 7), puis annule la réservation.
-#   --nettoyer              annule, par le contrôleur de Vik (task=docancelbooking),
-#                           jamais par SQL, toute réservation d'essai encore
-#                           ouverte dans le registre local pour cet hôte — y
-#                           compris après un échec. Ne relance aucune vérification.
+#   --reprise IDORDER       reprend une réservation d'essai payée en mode test
+#                           (voir chapitre 4 du brief) : relit sa page de
+#                           confirmation et son statut (vérification 6c), les
+#                           lignes de transcription d'enveloppe qui la
+#                           concernent (vérification 5), constate la tâche de
+#                           rappel sans la déclencher (vérification 7), puis
+#                           tente l'annulation par le formulaire natif de Vik.
+#   --nettoyer              annule, par le formulaire natif de Vik
+#                           (task=docancelbooking), jamais par SQL, toute
+#                           réservation d'essai encore ouverte dans le registre
+#                           local pour cet hôte — quand Vik la propose. Ne
+#                           relance aucune vérification.
+#   --journal FICHIER       recopie toute la sortie dans FICHIER (ajout en fin),
+#                           sans tube chez l'appelant : le code de sortie reste
+#                           celui du script. Préférer cette option à « | tee ».
 #   -h, --help              cette aide
 #
+# Code de sortie : 0 si toutes les vérifications menées sont OK ; 2 si au
+# moins une est KO ou non concluante (??), y compris un KO annoncé comme la
+# vérification 8 ; 1 sur un préalable au rouge ou une erreur. La dernière
+# ligne imprimée est toujours « SORTIE=<code> », lisible même quand la
+# sortie passe par un tube. Sous zsh, « a | tee f » rend le code de tee :
+# utiliser --journal, ou « setopt pipefail », ou lire $pipestatus[1].
+#
 # Ce que ce script ne fait jamais : lire une clé Stripe (secrète ou publiable
-# au-delà de son préfixe), écrire en base par SQL, déployer quoi que ce soit,
-# ou tourner ailleurs qu'en préproduction stricte. Il ne crée ni n'annule
-# aucune réservation tant que Vik Channel Manager n'est pas constaté inactif
-# ou absent sur la cible, --nettoyer et --reprise compris
-# (docs/briefs/constat-integrations-sortantes.md §3).
+# au-delà de son préfixe), écrire en base par SQL, déclencher une tâche
+# planifiée de Vik, déployer quoi que ce soit, ou tourner ailleurs qu'en
+# préproduction stricte. Tous les modes, --reprise et --nettoyer compris,
+# passent les mêmes préalables : hôte hors production, environment staging,
+# Vik Channel Manager absent du disque (docs/briefs/constat-recette-vcm-inactif.md
+# §7-8 : désactivé, il reste appelé par Vik Booking), VikStripe en clés de test.
 #
 set -u
 
@@ -88,21 +101,41 @@ info()  { printf '  %s\n' "$*"; }
 titre() { printf '\n== %s ==\n' "$*"; }
 mourir(){ rouge "ERREUR : $*"; exit 1; }
 
-usage() { sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+# Remplacé plus bas par restore_override_on_exit, qui imprime la même ligne.
+trap 'rc_sortie=$?; printf "\nSORTIE=%s\n" "$rc_sortie"; exit "$rc_sortie"' EXIT
+
+usage() { sed -n '2,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+JOURNAL=""
+declare -a ARGS_SANS_JOURNAL=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --hote)            HOTE="${2:-}"; shift 2 ;;
-    --ssh)             SSH_ALIAS="${2:-}"; shift 2 ;;
-    --appliquer)       APPLIQUER=1; shift ;;
-    --reprise)         REPRISE_IDORDER="${2:-}"; shift 2 ;;
-    --nettoyer)        NETTOYER=1; shift ;;
+    --hote)            HOTE="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
+    --ssh)             SSH_ALIAS="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
+    --appliquer)       APPLIQUER=1; ARGS_SANS_JOURNAL+=("$1"); shift ;;
+    --reprise)         REPRISE_IDORDER="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
+    --nettoyer)        NETTOYER=1; ARGS_SANS_JOURNAL+=("$1"); shift ;;
+    --journal)         JOURNAL="${2:-}"; shift 2 ;;
     -h|--help)         usage; exit 0 ;;
     *) mourir "option inconnue : $1 (--help pour l'usage)" ;;
   esac
 done
 
+# Le tube vit ici, dans ce script, et PIPESTATUS[0] rend le code du script
+# lui-même, jamais celui de tee (constat-reprise-1830-1831.md §3.1).
+if [ -n "$JOURNAL" ] && [ -z "${ICL_RECETTE_DANS_JOURNAL:-}" ]; then
+  trap - EXIT
+  ICL_RECETTE_DANS_JOURNAL=1 /bin/bash "${BASH_SOURCE[0]}" ${ARGS_SANS_JOURNAL[@]+"${ARGS_SANS_JOURNAL[@]}"} 2>&1 | tee -a "$JOURNAL"
+  exit "${PIPESTATUS[0]}"
+fi
+
 [ -n "$HOTE" ] || mourir "--hote est obligatoire : le domaine de préproduction cible ne se devine pas"
+if [ -n "$REPRISE_IDORDER" ]; then
+  case "$REPRISE_IDORDER" in
+    ''|*[!0-9]*) mourir "--reprise attend un identifiant de réservation numérique, reçu '$REPRISE_IDORDER'" ;;
+  esac
+fi
 
 command -v ssh >/dev/null || mourir "ssh introuvable"
 command -v curl >/dev/null || mourir "curl introuvable"
@@ -253,18 +286,75 @@ case "$MODE" in
     exit 0
     ;;
 
-  cronjob-id)
-    # Identifiant de la tâche planifiée dont le fichier de classe correspond
-    # au motif donné (ex. 'email_reminder'), via wp db query — identifiants
-    # de site utilisés par wp-cli lui-même, jamais lus ni manipulés par ce
-    # script (même choix que deployer-moteur.sh §3.2). Donnée structurelle
-    # non secrète (un nom de fichier de classe et un entier), jamais une
-    # valeur de configuration au sens de la règle absolue n°2.
-    MOTIF="$3"
+  reminder-jobs)
+    # Tâches de rappel de Vik (class_file email_reminder), publiées ou non :
+    # id, class_file, published, schedule_key, et trois réglages lus chacun
+    # par sa clé nommée dans params — jamais params en entier, qui porte le
+    # texte du message et l'adresse de test. Données structurelles.
+    # VikBookingCron::setup() (libraries/system/cron.php:133-183) n'inscrit
+    # dans WP-Cron que les tâches published = 1, sous le crochet
+    # vikbooking_cron_<class_file sans .php>_<id> (getScheduleHook, l. 508).
     command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
-    Q="SELECT id, class_file FROM sir_vikbooking_cronjobs WHERE class_file LIKE '%${MOTIF}%'"
-    ROWS=$(wp db query "$Q" --path="$BASE" --skip-column-names 2>/dev/null)
+    Q="SELECT id, class_file, published, schedule_key, JSON_UNQUOTE(JSON_EXTRACT(params,'\$.remindbefored')), JSON_UNQUOTE(JSON_EXTRACT(params,'\$.less_days_advance')), JSON_UNQUOTE(JSON_EXTRACT(params,'\$.test')) FROM sir_vikbooking_cronjobs WHERE class_file IN ('email_reminder','email_reminder.php') ORDER BY id"
+    ROWS=$(wp db query "$Q" --path="$BASE" --skip-column-names 2>/dev/null) \
+      || { err "wp db query a échoué : tâches de rappel illisibles"; exit 1; }
     kv ROWS "$(printf '%s' "$ROWS" | tr '\n\t' ';:')"
+    exit 0
+    ;;
+
+  cron-next)
+    # Prochaine exécution prévue par WP-Cron pour un crochet, ou ABSENT.
+    # Lecture seule : wp cron event list ne déclenche rien.
+    HOOK="$3"
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    LISTE=$(wp cron event list --fields=hook,next_run_gmt --format=csv --path="$BASE" 2>/dev/null) \
+      || { err "wp cron event list a échoué"; exit 1; }
+    NEXT=$(printf '%s\n' "$LISTE" | awk -F, -v h="$HOOK" '$1==h{gsub(/"/,"",$2); print $2; exit}')
+    kv NEXT_RUN_GMT "${NEXT:-ABSENT}"
+    exit 0
+    ;;
+
+  order-facts)
+    # Faits d'une réservation, par son id : statut, payée ou non, ts (clé de
+    # la page de confirmation avec sid), arrivée, et l'adresse du client
+    # SEULEMENT si elle est sur le domaine de recette — sinon HORS_RECETTE :
+    # l'adresse d'un vrai client ne quitte jamais le serveur.
+    IDORDER="$3"; DOMAINE="$4"
+    case "$IDORDER" in ''|*[!0-9]*) err "identifiant non numérique"; exit 1 ;; esac
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    DOM_SQL=$(printf '%s' "$DOMAINE" | sed "s/'/''/g")
+    Q="SELECT status, IF(totpaid > 0, 1, 0), ts, checkin, IF(custmail LIKE '%@${DOM_SQL}', custmail, 'HORS_RECETTE') FROM sir_vikbooking_orders WHERE id = ${IDORDER}"
+    ROW=$(wp db query "$Q" --path="$BASE" --skip-column-names 2>/dev/null) \
+      || { err "wp db query a échoué : faits de la réservation illisibles"; exit 1; }
+    kv NROWS "$(printf '%s\n' "$ROW" | grep -c . || true)"
+    IFS=$'\t' read -r ST PAYE TS CHECKIN COURRIEL <<< "$ROW"
+    kv STATUS "${ST:-}"; kv PAYE "${PAYE:-}"; kv TS "${TS:-}"; kv CHECKIN "${CHECKIN:-}"; kv COURRIEL "${COURRIEL:-}"
+    exit 0
+    ;;
+
+  booking-page)
+    # Page WordPress qui porte la vue booking de Vik (sa table des
+    # shortcodes). index.php?option=com_vikbooking&view=booking n'aboutit à
+    # aucun shortcode sur WordPress et rend la page d'accueil en 200 :
+    # constat-reprise-1836-1837.md §2.
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    Q="SELECT p.post_name FROM sir_vikbooking_wpshortcodes s JOIN sir_posts p ON p.ID = s.post_id WHERE s.type = 'booking' AND s.post_id > 0 AND p.post_status = 'publish'"
+    ROWS=$(wp db query "$Q" --path="$BASE" --skip-column-names 2>/dev/null) \
+      || { err "wp db query a échoué : page de la vue booking illisible"; exit 1; }
+    kv NROWS "$(printf '%s\n' "$ROWS" | grep -c . || true)"
+    kv POST_NAME "$(printf '%s' "$ROWS" | head -1)"
+    exit 0
+    ;;
+
+  brand-sender)
+    # sender_email de la marque dans le registre de lme-brands tel que chargé
+    # sur la cible (lme_brands_get_config), jamais recopié ici. bin2hex :
+    # même précaution que resolve-brand-key contre TranslatePress.
+    MARQUE="$3"
+    case "$MARQUE" in ''|*[!a-z]*) err "clé de marque invalide"; exit 1 ;; esac
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    HEX=$(wp eval '$c = lme_brands_get_config(); echo bin2hex( (string) ( isset( $c["brands"]["'"$MARQUE"'"]["sender_email"] ) ? $c["brands"]["'"$MARQUE"'"]["sender_email"] : "" ) );' --path="$BASE" 2>/dev/null)
+    kv SENDER_HEX "${HEX:-}"
     exit 0
     ;;
 
@@ -300,16 +390,6 @@ case "$MODE" in
       || { err "wp db query a échoué : présence de la réservation indéterminée"; exit 1; }
     kv NROWS "$(printf '%s\n' "$ROWS" | grep -c . || true)"
     kv ROWS "$(printf '%s' "$ROWS" | tr '\n\t' ';:')"
-    exit 0
-    ;;
-
-  cron-run)
-    HOOK="$3"
-    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
-    OUT=$(wp cron event run "$HOOK" --path="$BASE" 2>&1)
-    RC=$?
-    kv RC "$RC"
-    kv OUT "$(printf '%s' "$OUT" | tr '\n' '|')"
     exit 0
     ;;
 
@@ -360,20 +440,23 @@ case "$MODE" in
     ;;
 
   vcm-status)
-    # État de Vik Channel Manager sur la cible : active, inactive, absent, ou
-    # tout autre statut que wp-cli rapporte (active-network…). Lu par
-    # `wp plugin list` avec --skip-plugins : l'état vient de l'option
-    # active_plugins, sans charger aucun greffon — ni VCM lui-même, ni
-    # TranslatePress, qui réécrit la sortie de wp eval
-    # (constat-integrations-sortantes.md §0). Aucune valeur de configuration
-    # lue : un nom de greffon et un statut.
+    # État de Vik Channel Manager sur la cible. Vik Booking le détecte par
+    # ses fichiers, jamais par son activation (constat-recette-vcm-inactif.md
+    # §7) : « absent » n'est rendu que si wp-cli ne le liste pas ET que le
+    # dossier wp-content/plugins/vikchannelmanager n'existe pas. Dossier
+    # présent sans greffon listé : fichiers_presents. Sinon le statut de
+    # `wp plugin list` (active, inactive…), lu avec --skip-plugins, sans
+    # charger aucun greffon. Aucune valeur de configuration lue.
     command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
     LISTE=$(wp plugin list --fields=name,status --format=csv --path="$BASE" --skip-plugins --skip-themes 2>/dev/null) \
       || { err "wp plugin list a échoué"; exit 1; }
     [ "$(printf '%s\n' "$LISTE" | head -1)" = "name,status" ] \
       || { err "sortie de wp plugin list inattendue : état de Vik Channel Manager indéterminé"; exit 1; }
     STATUT=$(printf '%s\n' "$LISTE" | awk -F, '$1=="vikchannelmanager"{print $2; exit}')
-    kv VCM_STATUS "${STATUT:-absent}"
+    if [ -z "$STATUT" ]; then
+      if [ -e "$BASE/wp-content/plugins/vikchannelmanager" ]; then STATUT=fichiers_presents; else STATUT=absent; fi
+    fi
+    kv VCM_STATUS "$STATUT"
     exit 0
     ;;
 
@@ -425,15 +508,15 @@ kv_get() {
 
 expected_env_hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
 
-# ------------------------------------------------ Vik Channel Manager éteint
+# ------------------------------------------------ Vik Channel Manager absent
 # docs/briefs/incident-preproduction-vers-plateformes-2026-09-24.md : actif sur
 # la préproduction, Vik Channel Manager pousse chaque réservation d'essai vers
 # Airbnb, Booking.com et Expedia, qui ferment de vraies nuits. Toute création
-# ET toute annulation de réservation passe par lui (l'annulation pousse une
-# disponibilité calculée sur la base de préproduction, qui ignore les
-# réservations de production faites depuis la copie). Seuls « inactive » et
-# « absent » passent : un statut inconnu ou illisible refuse, jamais deviné.
-VCM_INACTIF_VERIFIE=0
+# ET toute annulation de réservation passe par lui. Désactivé, il reste appelé
+# par Vik Booking tant que ses fichiers sont sur le disque
+# (constat-recette-vcm-inactif.md §7) : seul « absent » passe. Un statut
+# inconnu ou illisible refuse, jamais deviné.
+VCM_ABSENT_VERIFIE=0
 
 vcm_statut_cible() {
   local out statut
@@ -444,16 +527,7 @@ vcm_statut_cible() {
 }
 
 vcm_statut_acceptable() {
-  [ "$1" = "inactive" ] || [ "$1" = "absent" ]
-}
-
-exiger_vcm_inactif() {
-  local geste="$1" statut
-  statut=$(vcm_statut_cible) || mourir "état de Vik Channel Manager illisible sur $HOTE : $geste refusé"
-  vcm_statut_acceptable "$statut" \
-    || mourir "Vik Channel Manager est '$statut' sur $HOTE : $geste refusé, chaque réservation y part vers les plateformes. Le désactiver (Plugins) avant de relancer."
-  vert "  OK   Vik Channel Manager '$statut' sur $HOTE"
-  VCM_INACTIF_VERIFIE=1
+  [ "$1" = "absent" ]
 }
 
 # ---------------------------------------------------------- préalables
@@ -485,11 +559,11 @@ run_preconditions() {
   # réservation si la garde de lme-brands la laisse passer.
   local vcm
   if vcm=$(vcm_statut_cible); then
-    check "Vik Channel Manager inactif (aucune réservation d'essai vers les plateformes)" \
-      "$(vcm_statut_acceptable "$vcm" && echo 1 || echo 0)" "statut relevé : $vcm"
-    vcm_statut_acceptable "$vcm" && VCM_INACTIF_VERIFIE=1
+    check "Vik Channel Manager absent du disque (aucun appel de Vik Booking vers lui)" \
+      "$(vcm_statut_acceptable "$vcm" && echo 1 || echo 0)" "statut relevé : $vcm${vcm:+$(vcm_statut_acceptable "$vcm" || echo ' — retirer le dossier wp-content/plugins/vikchannelmanager (Site Tools), le désactiver ne suffit pas')}"
+    vcm_statut_acceptable "$vcm" && VCM_ABSENT_VERIFIE=1
   else
-    check "Vik Channel Manager inactif (aucune réservation d'essai vers les plateformes)" 0 "état illisible"
+    check "Vik Channel Manager absent du disque (aucun appel de Vik Booking vers lui)" 0 "état illisible"
   fi
 
   out=$(remote_call vikstripe-test-keys)
@@ -548,16 +622,44 @@ restore_override_on_exit() {
         vert "  levier retiré (absent à l'entrée)"
       else
         rouge "  ÉCHEC de retrait du levier : intervention manuelle requise sur $HOTE"
+        [ "$rc" -eq 0 ] && rc=1
       fi
     fi
   fi
+  # Toujours la dernière ligne, pour qu'un tube chez l'appelant ne la perde
+  # jamais (constat-reprise-1830-1831.md §3.1).
+  printf '\nSORTIE=%s\n' "$rc"
   exit "$rc"
 }
 trap restore_override_on_exit EXIT
 
 # ---------------------------------------------------------------- rapport
-declare -a RAPPORT
+declare -a RAPPORT=()
 noter() { RAPPORT+=("$1"); }
+
+# imprimer_rapport TITRE : imprime le rapport et rend 0 si toutes ses lignes
+# sont OK, 2 sinon — KO, ??, et les KO annoncés comme la vérification 8
+# compris. L'état est le second champ de chaque ligne (« 5  OK  … »), jamais
+# un motif cherché dans toute la ligne. Un rapport vide rend 2 : aucune
+# vérification menée n'est pas un succès.
+imprimer_rapport() {
+  titre "$1"
+  local l etat rc=0
+  if [ "${#RAPPORT[@]}" -eq 0 ]; then
+    rouge "  aucune vérification menée"
+    return 2
+  fi
+  for l in "${RAPPORT[@]}"; do
+    etat=$(printf '%s' "$l" | awk '{print $2}')
+    if [ "$etat" = "OK" ]; then
+      vert "  $l"
+    else
+      rouge "  $l"
+      rc=2
+    fi
+  done
+  return "$rc"
+}
 
 # ============================================================ vérification 1
 verif1_resolution_marque() {
@@ -880,23 +982,22 @@ source "$REPO_ROOT/recetter-moteur-vik.sh"
 
 # ================================================================== main
 
+# Mêmes préalables pour tous les modes : --reprise et --nettoyer tentent une
+# annulation, qui passe par Vik Channel Manager et envoie des e-mails
+# (constat-reprise-1830-1831.md §3.3).
+run_preconditions
+[ "$PRECOND_OK" -eq 1 ] || mourir "au moins un préalable est au rouge — voir ci-dessus, ce script refuse de deviner"
+
 if [ "$NETTOYER" -eq 1 ]; then
   titre "Nettoyage — $HOTE"
-  OVERRIDE_RESTORE_NEEDED=0
-  exiger_vcm_inactif "le nettoyage (annulations)"
   nettoyer_registre
-  exit 0
-fi
-
-if [ -n "$REPRISE_IDORDER" ]; then
-  OVERRIDE_RESTORE_NEEDED=0
-  exiger_vcm_inactif "la reprise (rappel puis annulation)"
-  reprendre_reservation "$REPRISE_IDORDER"
   exit $?
 fi
 
-run_preconditions
-[ "$PRECOND_OK" -eq 1 ] || mourir "au moins un préalable est au rouge — voir ci-dessus, ce script refuse de deviner"
+if [ -n "$REPRISE_IDORDER" ]; then
+  reprendre_reservation "$REPRISE_IDORDER"
+  exit $?
+fi
 
 capture_override_original
 
@@ -939,13 +1040,8 @@ done
 
 verif8_liste_blanche
 
-titre "Rapport"
-for ligne in "${RAPPORT[@]}"; do
-  case "$ligne" in
-    *" OK "*|*" OK"*) vert "  $ligne" ;;
-    *) rouge "  $ligne" ;;
-  esac
-done
+imprimer_rapport "Rapport"
+RC_RAPPORT=$?
 
 if [ "$APPLIQUER" -eq 0 ]; then
   echo
@@ -958,3 +1054,5 @@ if [ -n "$REPRISES_EN_ATTENTE" ]; then
   jaune "Réservation(s) en attente de reprise (carte de test Stripe à saisir, puis --reprise IDORDER) :"
   printf '%s\n' "$REPRISES_EN_ATTENTE" | sed 's/^/    /'
 fi
+
+exit "$RC_RAPPORT"

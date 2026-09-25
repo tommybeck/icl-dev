@@ -11,6 +11,13 @@ exécutions ni depuis. Rien n'a été déployé, rien n'a été écrit en base p
 SQL. Les `sid` des réservations sont volontairement omis de ce fichier : ils
 ouvrent la page de confirmation, ce sont des jetons d'accès.
 
+> **25 septembre 2026 — voir `constat-reprise-1836-1837.md`.** Les défauts du
+> §3 y sont corrigés, et 3.4 et 3.5 y sont tranchés dans le code de Vik. Le
+> 403 vient du nonce `vikwp_nonce`, que Vik ne rend pas en mode
+> `resmodcanc = 1`. La tâche de rappel publiée est la 7, pas la 8. **Et la 6c
+> ci-dessous était un faux positif** : la page lue était la page d'accueil.
+> Le texte qui suit est conservé tel qu'écrit.
+
 ---
 
 ## 1. Commandes lancées
@@ -202,3 +209,4 @@ Rien de cette liste n'a été entrepris.
 
 - 24 septembre 2026 — première version, après les reprises de #1830 et #1831.
 - 24 septembre 2026 — 3.5 : #1830 et #1831 sont `confirmed`, l'hypothèse `standby` est écartée pour elles.
+- 25 septembre 2026 : renvoi vers `constat-reprise-1836-1837.md`, qui corrige le §3, tranche 3.4 et 3.5 et établit que la 6c était un faux positif.

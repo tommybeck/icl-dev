@@ -20,10 +20,11 @@
 # Le parcours est un enchaînement de POST sur la même page
 # (https://<hôte>/fr/reserver/), chaque étape portant un champ `task`
 # différent : search -> showprc -> oconfirm -> saveorder. Aucun jeton
-# anti-CSRF (`viktoken`/`vikwp_nonce`) n'existe sur cette installation —
-# relevé le 23 septembre 2026, absent de la page oconfirm en entier
-# (recherche insensible à la casse de « token », « nonce », « csrf »,
-# « _wpnonce ») : `tokenform` n'y est pas activé.
+# anti-CSRF n'est demandé par ce parcours — relevé le 23 septembre 2026,
+# absent de la page oconfirm en entier : `tokenform` n'y est pas activé.
+# Ce constat ne vaut que pour la réservation : docancelbooking et
+# cancelrequest exigent un nonce WordPress `vikwp_nonce` sans condition
+# (voir l'annulation, plus bas).
 #
 # Passerelle Stripe : gpayid=3 (`sir_vikbooking_gpayments.file = 'stripe'`,
 # `published = 1`), nommée « Pay (now or later) » dans l'administration —
@@ -197,10 +198,10 @@ vik_creer_reservation() {
   CREATE_COURRIEL=""; CREATE_ABSENCE="soumission finale non envoyée"
 
   # Dernier rempart, quel que soit l'appelant : jamais une création sans que
-  # Vik Channel Manager ait été constaté inactif sur la cible pendant cette
-  # exécution (recetter-moteur.sh, exiger_vcm_inactif / run_preconditions).
-  [ "${VCM_INACTIF_VERIFIE:-0}" -eq 1 ] \
-    || mourir "création de réservation refusée : Vik Channel Manager n'a pas été constaté inactif sur $HOTE"
+  # Vik Channel Manager ait été constaté absent de la cible pendant cette
+  # exécution (recetter-moteur.sh, run_preconditions).
+  [ "${VCM_ABSENT_VERIFIE:-0}" -eq 1 ] \
+    || mourir "création de réservation refusée : Vik Channel Manager n'a pas été constaté absent de $HOTE"
 
   local checkout_iso checkin_ddmmyyyy checkout_ddmmyyyy
   checkout_iso=$(iso_plus_jours "$checkin_iso" "$nuits")
@@ -414,68 +415,150 @@ registre_ajoute_sur_erreur() {
 
 # ============================================================== annulation
 #
-# task=docancelbooking (site/controller.php:2740) : sid + idorder + email +
-# reason. `JSession::checkToken()` y est vérifié sans condition (contrairement
-# à saveorder, qui l'ignore quand tokenform est désactivé) ; aucun champ
-# viktoken/vikwp_nonce n'a été trouvé sur cette installation (voir en-tête de
-# ce fichier), donc rien n'est ajouté au-delà de ce que la page de
-# confirmation porterait elle-même — au pire cette étape échoue proprement et
-# le nettoyage le rapporte, jamais en silence. La validation ne retient une
-# réservation que si son statut vaut 'confirmed' : une réservation encore en
-# 'standby' (carte de test jamais saisie) ne peut pas être annulée par ce
-# chemin, c'est une propriété du contrôleur de Vik, pas une limite de ce
-# script — le balayage natif de la parade de paiement (plan-de-marche.md,
-# chantier D) reprend les commandes standby abandonnées.
+# Établi le 25 septembre 2026 dans Vik Booking 1.8.15 sur staging13
+# (constat-reprise-1836-1837.md §3) :
+#
+#   - docancelbooking() (site/controller.php:2740) commence par
+#     JSession::checkToken(), qui exige un nonce WordPress `vikwp_nonce`
+#     (libraries/adapter/session/session.php:214-258). Sans lui : 403
+#     JINVALID_TOKEN, avant toute lecture du statut. C'était le 403 des
+#     réservations 1826 à 1831, confirmed comme standby.
+#   - Ce nonce n'est rendu que dans les formulaires de la page de
+#     réservation. Le formulaire docancelbooking n'y est rendu que si
+#     canc_allowed (site/views/booking/tmpl/default.php:235 et 1203), qui
+#     exige resmodcanc > 1. Or resmodcanc vaut 1 sur cette installation,
+#     « Disabled, with Request » : la page ne rend que le formulaire
+#     cancelrequest, qui envoie une demande à l'administrateur et n'annule
+#     rien. docancelbooking refait le même calcul et refuserait de toute façon.
+#   - Changer resmodcanc serait écrire dans la configuration de Vik, copiée
+#     de la production : ce script ne le fait pas, et ne fabrique pas de
+#     nonce. Tant que la page ne propose pas l'annulation, elle revient à
+#     Thomas, dans l'administration de Vik (Bookings).
+#
+# vik_annuler_reservation IDORDER SID TS
+#   0 : réservation relue 'cancelled' en base après le formulaire natif.
+#   1 : non annulée ; ANNULATION_MOTIF dit pourquoi.
+ANNULATION_MOTIF=""
+
+# page_reservation_url SID TS : URL de la page de réservation de Vik (la page
+# qui porte le shortcode booking), ou code 1 si elle est introuvable.
+PAGE_RESERVATION_POST_NAME=""
+page_reservation_url() {
+  if [ -z "$PAGE_RESERVATION_POST_NAME" ]; then
+    local out n
+    out=$(remote_call booking-page) || return 1
+    n=$(printf '%s\n' "$out" | kv_get NROWS)
+    [ "$n" = "1" ] || return 1
+    PAGE_RESERVATION_POST_NAME=$(printf '%s\n' "$out" | kv_get POST_NAME)
+    [ -n "$PAGE_RESERVATION_POST_NAME" ] || return 1
+  fi
+  printf 'https://%s/%s/?sid=%s&ts=%s' "$HOTE" "$PAGE_RESERVATION_POST_NAME" "$1" "$2"
+}
+
+# lire_faits_reservation IDORDER : pose FAIT_STATUS, FAIT_PAYE, FAIT_TS,
+# FAIT_CHECKIN, FAIT_COURRIEL (adresse de recette, ou HORS_RECETTE). Code 1
+# si la base n'a pas répondu ou si la réservation n'existe pas.
+lire_faits_reservation() {
+  local out
+  FAIT_STATUS=""; FAIT_PAYE=""; FAIT_TS=""; FAIT_CHECKIN=""; FAIT_COURRIEL=""
+  out=$(remote_call order-facts "$1" "$MARQUAGE_EMAIL_DOMAINE") || return 1
+  [ "$(printf '%s\n' "$out" | kv_get NROWS)" = "1" ] || return 1
+  FAIT_STATUS=$(printf '%s\n' "$out" | kv_get STATUS)
+  FAIT_PAYE=$(printf '%s\n' "$out" | kv_get PAYE)
+  FAIT_TS=$(printf '%s\n' "$out" | kv_get TS)
+  FAIT_CHECKIN=$(printf '%s\n' "$out" | kv_get CHECKIN)
+  FAIT_COURRIEL=$(printf '%s\n' "$out" | kv_get COURRIEL)
+}
+
 vik_annuler_reservation() {
-  local idorder="$1" sid="$2" courriel="$3"
+  local idorder="$1" sid="$2" ts="$3"
+  ANNULATION_MOTIF=""
 
   # Même rempart que vik_creer_reservation() : une annulation pousse elle
-  # aussi une disponibilité vers les plateformes si VCM est actif.
-  [ "${VCM_INACTIF_VERIFIE:-0}" -eq 1 ] \
-    || mourir "annulation de réservation refusée : Vik Channel Manager n'a pas été constaté inactif sur $HOTE"
+  # aussi une disponibilité vers les plateformes si VCM est présent.
+  [ "${VCM_ABSENT_VERIFIE:-0}" -eq 1 ] \
+    || mourir "annulation de réservation refusée : Vik Channel Manager n'a pas été constaté absent de $HOTE"
 
-  local page_confirmation; page_confirmation=$(vik_get "https://$HOTE/index.php?option=com_vikbooking&view=booking&sid=${sid}&idorder=${idorder}")
-  local viktoken vikwp_nonce
-  viktoken=$(extraire_valeur_champ "$page_confirmation" "viktoken")
-  vikwp_nonce=$(extraire_valeur_champ "$page_confirmation" "vikwp_nonce")
-
-  local -a champs=(
-    "option=com_vikbooking" "task=docancelbooking"
-    "sid=${sid}" "idorder=${idorder}" "email=${courriel}"
-    "reason=${MARQUAGE_RAISON_ANNULATION}"
-  )
-  [ -n "$viktoken" ] && champs+=("viktoken=${viktoken}")
-  [ -n "$vikwp_nonce" ] && champs+=("vikwp_nonce=${vikwp_nonce}")
-
-  local brut_annulation; brut_annulation=$(vik_curl_post_brut "https://$HOTE/index.php" "${champs[@]}")
-  VIK_LAST_CODE=$(printf '%s\n' "$brut_annulation" | sed -n 's/^__ICL_CODE__//p' | tail -1)
-  VIK_LAST_URL=$(printf '%s\n' "$brut_annulation" | sed -n 's/^__ICL_URL__//p' | tail -1)
-  local page_resultat; page_resultat=$(printf '%s\n' "$brut_annulation" | sed '/^__ICL_CODE__/d; /^__ICL_URL__/d')
-
-  if { [ "$VIK_LAST_CODE" = "200" ] || [ "$VIK_LAST_CODE" = "302" ]; } && printf '%s' "$page_resultat" | grep -qiE "cancel|annul"; then
+  if ! lire_faits_reservation "$idorder"; then
+    ANNULATION_MOTIF="réservation #$idorder illisible en base"
+    return 1
+  fi
+  if [ "$FAIT_COURRIEL" = "HORS_RECETTE" ] || [ -z "$FAIT_COURRIEL" ]; then
+    ANNULATION_MOTIF="#$idorder ne porte pas une adresse de recette : ce n'est pas une réservation d'essai, aucune annulation tentée"
+    return 1
+  fi
+  if [ "$FAIT_STATUS" = "cancelled" ]; then
     return 0
   fi
-  jaune "  annulation non confirmée pour idorder=$idorder (code $VIK_LAST_CODE) — probablement encore 'standby' (carte de test non saisie), politique d'annulation refusée (délai minimal), ou jeton anti-CSRF requis et non transmis"
+  if [ "$FAIT_STATUS" != "confirmed" ]; then
+    ANNULATION_MOTIF="statut '$FAIT_STATUS' : docancelbooking ne retient que les réservations confirmed, annulation manuelle dans Bookings"
+    return 1
+  fi
+
+  local url page nonce itemid
+  url=$(page_reservation_url "$sid" "$ts") || { ANNULATION_MOTIF="page de la vue booking de Vik introuvable"; return 1; }
+  page=$(vik_get "$url")
+  if ! printf '%s' "$page" | grep -q 'vbo-booking-details-head-'; then
+    ANNULATION_MOTIF="la page de réservation n'affiche pas la réservation #$idorder"
+    return 1
+  fi
+  if ! printf '%s' "$page" | grep -q 'value="docancelbooking"'; then
+    if printf '%s' "$page" | grep -q 'value="cancelrequest"'; then
+      ANNULATION_MOTIF="Vik ne rend pas le formulaire docancelbooking, seulement la demande cancelrequest qui n'annule rien (mode « Disabled, with Request » relevé le 25 septembre 2026), annulation manuelle dans Bookings"
+    else
+      ANNULATION_MOTIF="Vik ne propose aucun formulaire d'annulation sur cette page, annulation manuelle dans Bookings"
+    fi
+    return 1
+  fi
+
+  # Chemin natif, rendu par Vik lui-même. Non exercé à ce jour : aucune
+  # page de cette installation ne rend ce formulaire. Le résultat se juge en
+  # base, jamais sur un mot de la page. Vik y rembourse aussi le montant
+  # payé par la passerelle (en clés de test ici, préalable vérifié) et écrit
+  # au client et à l'administrateur.
+  nonce=$(extraire_valeur_champ "$page" "vikwp_nonce")
+  itemid=$(extraire_valeur_champ "$page" "Itemid")
+  [ -n "$nonce" ] || { ANNULATION_MOTIF="formulaire d'annulation rendu sans nonce vikwp_nonce"; return 1; }
+  local -a champs=(
+    "option=com_vikbooking" "task=docancelbooking"
+    "sid=${sid}" "idorder=${idorder}" "email=${FAIT_COURRIEL}"
+    "reason=${MARQUAGE_RAISON_ANNULATION}" "vikwp_nonce=${nonce}"
+  )
+  [ -n "$itemid" ] && champs+=("Itemid=${itemid}")
+  local brut; brut=$(vik_curl_post_brut "$url" "${champs[@]}")
+  VIK_LAST_CODE=$(printf '%s\n' "$brut" | sed -n 's/^__ICL_CODE__//p' | tail -1)
+
+  if lire_faits_reservation "$idorder" && [ "$FAIT_STATUS" = "cancelled" ]; then
+    return 0
+  fi
+  ANNULATION_MOTIF="formulaire natif soumis (code $VIK_LAST_CODE), statut relu '${FAIT_STATUS:-illisible}'"
   return 1
 }
 
+# nettoyer_registre : rend 0 si toutes les réservations du registre sont
+# annulées (ou l'étaient déjà), 2 si au moins une reste ouverte.
 nettoyer_registre() {
   local idorder sid ts marque room statut horodatage traitees=0 echecs=0
-  while IFS=$'\t' read -r idorder sid ts marque room statut horodatage; do
+  local -a lignes=()
+  while IFS= read -r ligne; do lignes+=("$ligne"); done < "$REGISTRE"
+  for ligne in ${lignes[@]+"${lignes[@]}"}; do
+    IFS=$'\t' read -r idorder sid ts marque room statut horodatage <<< "$ligne"
     [ -n "$idorder" ] || continue
     [ "$statut" = "nettoyee" ] && continue
-    info "annulation de la réservation d'essai #$idorder (sid=$sid, $marque, chambre $room, créée $horodatage)"
-    if vik_annuler_reservation "$idorder" "$sid" "recette@${MARQUAGE_EMAIL_DOMAINE}"; then
-      vert "  OK   #$idorder annulée"
+    info "réservation d'essai #$idorder ($marque, chambre $room, inscrite $horodatage)"
+    if vik_annuler_reservation "$idorder" "$sid" "$ts"; then
+      vert "  OK   #$idorder annulée (statut relu en base : cancelled)"
       registre_maj_statut "$idorder" "nettoyee"
       traitees=$((traitees + 1))
     else
-      rouge "  KO   #$idorder non annulée — reste dans le registre, à retraiter par --nettoyer"
+      rouge "  KO   #$idorder non annulée : $ANNULATION_MOTIF"
       echecs=$((echecs + 1))
     fi
-  done < "$REGISTRE"
+  done
   echo
-  info "$traitees annulée(s), $echecs échec(s) ou en attente"
+  info "$traitees annulée(s), $echecs encore ouverte(s)"
+  [ "$echecs" -eq 0 ] || return 2
+  return 0
 }
 
 # ============================================================ vérification 3
@@ -631,6 +714,184 @@ verif5_6_reservation_reelle() {
 }
 
 # ================================================================= reprise
+
+ts_vers_iso() {
+  date -u -r "$1" +%Y-%m-%d 2>/dev/null || date -u -d "@$1" +%Y-%m-%d
+}
+
+# Filtre de la transcription d'enveloppe : $argv[1] adresse de recette de la
+# réservation, $argv[2] fichier du journal. Imprime, pour chaque ligne qui la
+# concerne, « rôle<TAB>adresse From<TAB>ligne », où rôle vaut client (elle
+# est destinataire) ou copie (elle est en Reply-To : copie de
+# l'administrateur). Comparaison d'adresse entière, jamais par sous-chaîne.
+read -r -d '' VERIF5_FILTRE <<'PHP_EOF'
+<?php
+$cible = strtolower( trim( $argv[1] ) );
+$adresse = function ( $v ) {
+	$v = (string) $v;
+	return strtolower( trim( preg_match( '/<([^>]+)>/', $v, $m ) ? $m[1] : $v ) );
+};
+foreach ( (array) @file( $argv[2], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES ) as $l ) {
+	$j = json_decode( $l, true );
+	if ( ! is_array( $j ) ) {
+		continue;
+	}
+	$role = null;
+	foreach ( explode( ',', (string) ( isset( $j['to'] ) ? $j['to'] : '' ) ) as $to ) {
+		if ( $adresse( $to ) === $cible ) {
+			$role = 'client';
+		}
+	}
+	if ( null === $role && $adresse( isset( $j['reply_to'] ) ? $j['reply_to'] : '' ) === $cible ) {
+		$role = 'copie';
+	}
+	if ( null !== $role ) {
+		echo $role, "\t", $adresse( isset( $j['from'] ) ? $j['from'] : '' ), "\t", $l, "\n";
+	}
+}
+PHP_EOF
+
+# Vérification 5 : les lignes de la transcription qui concernent CETTE
+# réservation, par son adresse de recette relue en base (la seule clé commune
+# au message client, dont l'objet ne porte pas l'idorder, et à la copie de
+# l'administrateur). Toutes affichées. KO s'il n'y en a aucune, ou aucune pour
+# le message client, ou si son From composé n'est pas le sender_email de la
+# marque dans lme-brands.
+verif5_transcription() {
+  local marque="$1" courriel="$2"
+  titre "Vérification 5 — transcription d'enveloppe de $courriel"
+
+  local journal="$ETAT_DIR/enveloppes.log" lignes
+  remote_call envelope-log-tail-since 0 > "$journal" \
+    || { rouge "  KO   transcription d'enveloppe illisible"; noter "5  KO  ($marque) transcription illisible"; return; }
+  lignes=$(php -- "$courriel" "$journal" <<< "$VERIF5_FILTRE")
+  rm -f "$journal"
+
+  if [ -z "$lignes" ]; then
+    rouge "  KO   aucune ligne de transcription pour $courriel"
+    noter "5  KO  ($marque) aucune ligne de transcription pour cette réservation"
+    return
+  fi
+
+  local role from json n_client=0 from_client=""
+  while IFS=$'\t' read -r role from json; do
+    info "  [$role] $json"
+    if [ "$role" = "client" ]; then
+      n_client=$((n_client + 1))
+      from_client="${from_client:+$from_client,}$from"
+    fi
+  done <<< "$lignes"
+
+  if [ "$n_client" -eq 0 ]; then
+    rouge "  KO   aucun message client transcrit (seulement la copie de l'administrateur)"
+    noter "5  KO  ($marque) message client absent de la transcription"
+    return
+  fi
+
+  local out hex attendu
+  out=$(remote_call brand-sender "$marque")
+  hex=$(printf '%s\n' "$out" | kv_get SENDER_HEX)
+  attendu=$(php -r 'echo strtolower( (string) @hex2bin( $argv[1] ) );' -- "$hex")
+  if [ -z "$attendu" ]; then
+    rouge "  KO   sender_email de '$marque' illisible dans lme-brands : expéditeur non jugé"
+    noter "5  KO  ($marque) expéditeur attendu illisible"
+    return
+  fi
+
+  local f ok=1
+  for f in $(printf '%s' "$from_client" | tr ',' ' '); do
+    [ "$f" = "$attendu" ] || ok=0
+  done
+  if [ "$ok" -eq 1 ]; then
+    vert "  OK   message client composé avec From $from_client, sender_email de '$marque'"
+    noter "5  OK  ($marque) From composé $from_client — ce que WordPress compose, pas ce que le relais Gmail envoie"
+  else
+    rouge "  KO   From du message client '$from_client', attendu '$attendu'"
+    noter "5  KO  ($marque) From composé $from_client, attendu $attendu"
+  fi
+}
+
+# Vérification 6c : la page de réservation de Vik affiche la réservation
+# confirmée, et la base la dit confirmed et payée. L'ancienne lecture de
+# index.php?option=com_vikbooking&view=booking&sid=…&idorder=… rendait la page
+# d'accueil en 200 (pas de shortcode, pas de ts) : faux positif constant
+# jusqu'au 25 septembre 2026.
+verif6c_confirmation() {
+  local marque="$1" idorder="$2" sid="$3" ts="$4"
+  titre "Vérification 6c — confirmation de #$idorder"
+
+  local url fichier="$ETAT_DIR/reprise-confirmation.html" code
+  if ! url=$(page_reservation_url "$sid" "$ts"); then
+    rouge "  KO   page de la vue booking de Vik introuvable (table des shortcodes)"
+    noter "6c KO  ($marque) page de réservation introuvable"
+    return
+  fi
+  code=$(curl -s -o "$fichier" -w '%{http_code}' -L --max-time 20 "$url")
+  local etat_page="illisible"
+  if [ "$code" = "200" ]; then
+    etat_page=$(grep -oE 'vbo-booking-details-head-(confirmed|pending|cancelled)' "$fichier" | head -1 | sed 's/^vbo-booking-details-head-//')
+    [ -n "$etat_page" ] || etat_page="réservation non affichée"
+  fi
+  rm -f "$fichier"
+
+  info "  page de réservation : HTTP $code, état affiché '$etat_page' ; base : statut '$FAIT_STATUS', payée $FAIT_PAYE"
+  if [ "$etat_page" = "confirmed" ] && [ "$FAIT_STATUS" = "confirmed" ] && [ "$FAIT_PAYE" = "1" ]; then
+    vert "  OK   #$idorder confirmée et payée, affichée confirmée par Vik"
+    noter "6c OK  ($marque) #$idorder confirmed et payée en base, page de réservation « confirmed »"
+  else
+    rouge "  KO   #$idorder : page '$etat_page', base '$FAIT_STATUS', payée $FAIT_PAYE"
+    noter "6c KO  ($marque) page '$etat_page', base '$FAIT_STATUS', payée $FAIT_PAYE"
+  fi
+}
+
+# Vérification 7 : constate la tâche de rappel, ne la déclenche jamais.
+#
+# Établi dans Vik 1.8.15 (constat-reprise-1836-1837.md §4) : une tâche
+# publiée est inscrite dans WP-Cron par VikBookingCron::setup(), sur
+# plugins_loaded, sous vikbooking_cron_<class_file>_<id>. Son exécution
+# (admin/cronjobs/email_reminder.php, execute()) écrit à TOUTES les
+# réservations confirmed de la base dont l'arrivée tombe dans sa fenêtre,
+# pas à une réservation choisie : sur la préproduction, ce sont les vraies
+# réservations copiées de la production. L'ancien script déduisait le crochet
+# de la dernière tâche email_reminder, publiée ou non (la 8, dépubliée), et le
+# déclenchait : avec la 7, il aurait écrit à de vrais clients.
+verif7_rappel() {
+  local marque="$1" idorder="$2"
+  titre "Vérification 7 — rappel avant séjour (constat, sans déclenchement)"
+
+  local out rows
+  if ! out=$(remote_call reminder-jobs); then
+    rouge "  KO   tâches de rappel illisibles (sir_vikbooking_cronjobs)"
+    noter "7  KO  ($marque) tâches de rappel illisibles"
+    return
+  fi
+  rows=$(printf '%s\n' "$out" | kv_get ROWS)
+
+  local r id classe pub sched avance moins test publiees=0 hook next debut fin arrivee resume=""
+  arrivee=$(ts_vers_iso "$FAIT_CHECKIN")
+  for r in $(printf '%s' "$rows" | tr ';' ' '); do
+    IFS=: read -r id classe pub sched avance moins test <<< "$r"
+    case "$avance" in ''|*[!0-9]*) avance=0 ;; esac
+    [ "$pub" = "1" ] || { info "  tâche #$id ($classe, $sched) dépubliée : jamais inscrite dans WP-Cron"; continue; }
+    publiees=$((publiees + 1))
+    hook="vikbooking_cron_${classe%.php}_${id}"
+    next=$(remote_call cron-next "$hook" | kv_get NEXT_RUN_GMT)
+    fin=$(date_dans_jours "${avance:-0}")
+    if [ "${avance:-0}" -gt 1 ] && [ "$moins" = "1" ]; then debut=$(date_dans_jours 0); else debut="$fin"; fi
+    info "  tâche #$id publiée ($sched), crochet $hook, prochaine exécution WP-Cron : ${next:-illisible} UTC (WP-Cron ne tourne pas sur la préproduction)"
+    info "  fenêtre si déclenchée aujourd'hui : arrivées confirmed du $debut au $fin (UTC), mode test $test ; arrivée de #$idorder : $arrivee"
+    resume="${resume:+$resume ; }#$id vise les arrivées du $debut au $fin"
+  done
+
+  if [ "$publiees" -eq 0 ]; then
+    rouge "  KO   aucune tâche de rappel publiée : aucun rappel ne part"
+    noter "7  KO  ($marque) aucune tâche de rappel publiée"
+    return
+  fi
+  jaune "  ??   déclenchement refusé : la tâche écrit à toutes les réservations de sa fenêtre, vraies réservations copiées comprises"
+  noter "7  ??  ($marque) non établie, déclenchement refusé ($resume, #$idorder arrive le $arrivee)"
+}
+
 reprendre_reservation() {
   local idorder="$1"
   local ligne; ligne=$(registre_ligne "$idorder")
@@ -639,83 +900,29 @@ reprendre_reservation() {
   local sid ts marque room statut horodatage
   IFS=$'\t' read -r idorder sid ts marque room statut horodatage <<< "$ligne"
 
-  titre "Reprise — réservation #$idorder ($marque, chambre #$room)"
+  titre "Reprise — réservation #$idorder ($marque, chambre #$room, registre '$statut')"
 
-  local http_code; http_code=$(curl -s -o /tmp/icl-recette-confirmation.html -w '%{http_code}' -L --max-time 20 "https://$HOTE/index.php?option=com_vikbooking&view=booking&sid=${sid}&idorder=${idorder}")
-  local page_confirmation; page_confirmation=$(cat /tmp/icl-recette-confirmation.html 2>/dev/null)
-  rm -f /tmp/icl-recette-confirmation.html
+  lire_faits_reservation "$idorder" \
+    || mourir "réservation #$idorder illisible dans sir_vikbooking_orders : reprise impossible"
+  [ "$FAIT_COURRIEL" != "HORS_RECETTE" ] && [ -n "$FAIT_COURRIEL" ] \
+    || mourir "#$idorder ne porte pas une adresse de recette : ce n'est pas une réservation d'essai, reprise refusée"
+  [ "$FAIT_TS" = "$ts" ] \
+    || jaune "  ts du registre ($ts) différent de la base ($FAIT_TS) : la base fait foi"
 
-  if [ "$http_code" != "200" ]; then
-    rouge "  KO   page de confirmation illisible (statut $http_code) : le paiement de test a-t-il été mené à bien ?"
-    return 1
-  fi
+  verif6c_confirmation "$marque" "$idorder" "$sid" "$FAIT_TS"
+  verif5_transcription "$marque" "$FAIT_COURRIEL"
+  verif7_rappel "$marque" "$idorder"
 
-  if printf '%s' "$page_confirmation" | grep -qiE 'standby|en attente|pending'; then
-    jaune "  la réservation semble encore en attente de paiement ('standby') : la carte de test a-t-elle été validée ?"
-  fi
-
-  vert "  OK   page de confirmation lisible (statut 200)"
-  noter "6c OK  ($marque) page de confirmation affichée après retour de paiement, sur $HOTE"
-
-  # Vérification 5 : transcription d'enveloppe (chapitre 2 du brief) — jamais
-  # la boîte fourre-tout elle-même.
-  local env_tail; env_tail=$(remote_call envelope-log-tail-since 0)
-  if printf '%s' "$env_tail" | grep -qE "\"host\":\"$HOTE\""; then
-    vert "  OK   au moins une ligne de transcription d'enveloppe pour cet hôte"
-    local derniere; derniere=$(printf '%s' "$env_tail" | grep -E "\"host\":\"$HOTE\"" | tail -1)
-    info "  dernière ligne : $derniere"
-    noter "5  OK  ($marque) transcription d'enveloppe présente — vérifier à l'œil From/Sender/Reply-To ci-dessus"
-  else
-    rouge "  KO   aucune ligne de transcription d'enveloppe trouvée pour $HOTE"
-    noter "5  KO  ($marque) transcription d'enveloppe absente"
-  fi
-
-  # Vérification 7 : rappel avant séjour, tâche planifiée de Vik.
-  local out rows job_id
-  out=$(remote_call cronjob-id "email_reminder")
-  rows=$(printf '%s\n' "$out" | kv_get ROWS)
-  job_id=$(printf '%s' "$rows" | tr ';' '\n' | grep -oE '^[0-9]+' | tail -1)
-
-  if [ -z "$job_id" ]; then
-    rouge "  KO   impossible de déterminer l'identifiant de la tâche planifiée 'email_reminder' (sir_vikbooking_cronjobs)"
-    noter "7  KO  identifiant de tâche introuvable"
-  else
-    local hook="vikbooking_cron_email_reminder_${job_id}"
-    info "  déclenchement de $hook (wp cron event run)"
-    local env_offset_avant; env_offset_avant=$(remote_call envelope-log-offset)
-    out=$(remote_call cron-run "$hook")
-    local rc; rc=$(printf '%s\n' "$out" | kv_get RC)
-    if [ "$rc" = "0" ]; then
-      vert "  OK   $hook exécutée"
-      local env_tail_apres; env_tail_apres=$(remote_call envelope-log-tail-since "$env_offset_avant")
-      if [ -n "$env_tail_apres" ]; then
-        vert "  OK   nouvelle(s) ligne(s) de transcription d'enveloppe après le rappel"
-        noter "7  OK  ($marque) rappel avant séjour déclenché et transcrit"
-      else
-        jaune "  aucune nouvelle ligne transcrite : normal si l'arrivée d'essai n'est pas à J-2 (fenêtre du rappel)"
-        noter "7  ??  ($marque) rappel exécuté sans envoi observé — attendu si l'arrivée n'est pas à J-2"
-      fi
-    else
-      rouge "  KO   échec de $hook : $(printf '%s\n' "$out" | kv_get OUT)"
-      noter "7  KO  ($marque) échec de la tâche planifiée"
-    fi
-  fi
-
-  echo
-  info "annulation de la réservation d'essai #$idorder"
-  if vik_annuler_reservation "$idorder" "$sid" "recette@${MARQUAGE_EMAIL_DOMAINE}"; then
-    vert "  OK   #$idorder annulée"
+  titre "Annulation de #$idorder"
+  if vik_annuler_reservation "$idorder" "$sid" "$FAIT_TS"; then
+    vert "  OK   #$idorder annulée (statut relu en base : cancelled)"
     registre_maj_statut "$idorder" "nettoyee"
+    noter "an OK  ($marque) #$idorder annulée"
   else
-    rouge "  KO   #$idorder non annulée automatiquement — relancer avec --nettoyer"
+    rouge "  KO   #$idorder non annulée : $ANNULATION_MOTIF"
     registre_maj_statut "$idorder" "a_nettoyer"
+    noter "an KO  ($marque) #$idorder non annulée, $ANNULATION_MOTIF"
   fi
 
-  titre "Rapport (reprise #$idorder)"
-  for l in "${RAPPORT[@]}"; do
-    case "$l" in
-      *" OK "*|*" OK"*) vert "  $l" ;;
-      *) rouge "  $l" ;;
-    esac
-  done
+  imprimer_rapport "Rapport (reprise #$idorder)"
 }
