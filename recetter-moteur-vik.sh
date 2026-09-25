@@ -169,15 +169,32 @@ vik_curl_post_brut() {
 #
 # vik_creer_reservation ROOM_ID CHECKIN(YYYY-MM-DD) NUITS
 #
-# Résultat dans CREATE_STATUT : created | refused_403 | refus_vik | ambigu | erreur
+# Résultat dans CREATE_STATUT : created | creee_sur_erreur | refused_403 |
+#                                refus_vik | ambigu | indetermine | erreur
 # Sur created : CREATE_SID, CREATE_TS, CREATE_IDORDER, CREATE_REDIRECT_URL,
 #               CREATE_STRIPE_HREF (lien Stripe Checkout relevé dans la page,
 #               vide si absent — voir extraire_href_stripe_wrapper()).
 # Sur refused_403 : CREATE_TITRE (titre de la page wp_die).
 # Sur refus_vik : CREATE_MESSAGE_VIK (texte du <p class="err"> de Vik).
+# Sur creee_sur_erreur : la soumission finale a échoué (code HTTP inattendu
+#               ou réponse sans sid) mais la réservation est en base,
+#               retrouvée par CREATE_COURRIEL : CREATE_IDORDER, CREATE_SID,
+#               CREATE_TS sont posés, jamais de lien Stripe. L'appelant
+#               l'inscrit au registre.
+# Sur indetermine : même échec, et la relecture en base a échoué elle
+#               aussi. Ni présence ni absence ne sont affirmées.
+# Sur erreur : aucune réservation. CREATE_ABSENCE dit pourquoi c'est sûr :
+#               « soumission finale non envoyée » ou « absence vérifiée en
+#               base ».
+#
+# Une erreur à la soumission finale ne prouve pas l'absence de réservation :
+# saveorder() insère la commande avant d'appeler Vik Channel Manager, et le
+# 500 du 24 septembre 2026 est survenu après l'insertion
+# (constat-recette-vcm-inactif.md §4).
 vik_creer_reservation() {
   local room_id="$1" checkin_iso="$2" nuits="$3"
   CREATE_STATUT="erreur"; CREATE_SID=""; CREATE_TS=""; CREATE_IDORDER=""; CREATE_REDIRECT_URL=""; CREATE_STRIPE_HREF=""; CREATE_TITRE=""; CREATE_MESSAGE_VIK=""
+  CREATE_COURRIEL=""; CREATE_ABSENCE="soumission finale non envoyée"
 
   # Dernier rempart, quel que soit l'appelant : jamais une création sans que
   # Vik Channel Manager ait été constaté inactif sur la cible pendant cette
@@ -264,6 +281,7 @@ vik_creer_reservation() {
   #    site/controller.php ~ligne 288-367) faute de ces trois champs — jamais
   #    deviné, cause confirmée par lecture directe du contrôleur.
   local courriel="recette+$(date +%s)@${MARQUAGE_EMAIL_DOMAINE}"
+  CREATE_COURRIEL="$courriel"
   local -a champs_saveorder=(
     "option=com_vikbooking" "task=saveorder"
     "${VBF_PRENOM_CHAMP}=${MARQUAGE_PRENOM}"
@@ -295,7 +313,7 @@ vik_creer_reservation() {
 
   if [ "$VIK_LAST_CODE" != "200" ] && [ "$VIK_LAST_CODE" != "302" ]; then
     rouge "  code HTTP inattendu à la soumission finale : $VIK_LAST_CODE"
-    CREATE_STATUT="erreur"
+    vik_retrouver_par_courriel
     return 1
   fi
 
@@ -326,7 +344,8 @@ vik_creer_reservation() {
   if [ -z "$CREATE_SID" ]; then
     jaune "  signal ambigu : ni le refus de la garde (403 + titre attendu) ni une redirection portant 'sid' n'ont été observés"
     jaune "  code $VIK_LAST_CODE, URL finale : $VIK_LAST_URL"
-    CREATE_STATUT="ambigu"
+    vik_retrouver_par_courriel
+    [ "$CREATE_STATUT" = "erreur" ] && CREATE_STATUT="ambigu"
     return 1
   fi
 
@@ -342,6 +361,55 @@ vik_creer_reservation() {
 
   CREATE_STATUT="created"
   return 0
+}
+
+# vik_retrouver_par_courriel
+#
+# Après une soumission finale envoyée mais sans succès lisible : cherche en
+# base la réservation portant CREATE_COURRIEL, adresse unique à la seconde.
+# Pose CREATE_STATUT à creee_sur_erreur (avec CREATE_IDORDER, CREATE_SID,
+# CREATE_TS), à erreur avec CREATE_ABSENCE « absence vérifiée en base », ou à
+# indetermine si la base n'a pas répondu. Jamais « non créée » sans lecture.
+vik_retrouver_par_courriel() {
+  local out nrows rows
+  if ! out=$(remote_call orders-from-email "$CREATE_COURRIEL"); then
+    rouge "  relecture de sir_vikbooking_orders impossible : présence de la réservation indéterminée ($CREATE_COURRIEL)"
+    CREATE_STATUT="indetermine"
+    return
+  fi
+  nrows=$(printf '%s\n' "$out" | kv_get NROWS)
+  rows=$(printf '%s\n' "$out" | kv_get ROWS)
+  case "$nrows" in
+    0)
+      info "  aucune réservation en base pour $CREATE_COURRIEL : absence vérifiée"
+      CREATE_ABSENCE="absence vérifiée en base"
+      CREATE_STATUT="erreur"
+      ;;
+    1)
+      # ROWS = id:sid:ts:status; (tabulations et fins de ligne transcrites)
+      local ligne="${rows%%;*}"
+      CREATE_IDORDER=$(printf '%s' "$ligne" | cut -d: -f1)
+      CREATE_SID=$(printf '%s' "$ligne" | cut -d: -f2)
+      CREATE_TS=$(printf '%s' "$ligne" | cut -d: -f3)
+      rouge "  réservation #$CREATE_IDORDER bel et bien insérée malgré l'échec (statut Vik '$(printf '%s' "$ligne" | cut -d: -f4)')"
+      CREATE_STATUT="creee_sur_erreur"
+      ;;
+    *)
+      rouge "  $nrows réservations en base pour $CREATE_COURRIEL, une seule attendue : $rows"
+      CREATE_STATUT="indetermine"
+      ;;
+  esac
+}
+
+# registre_ajoute_sur_erreur MARQUE ROOM_ID VERIF
+#
+# Inscrit au registre une réservation creee_sur_erreur, pour que --nettoyer
+# la voie, et le note au rapport.
+registre_ajoute_sur_erreur() {
+  local marque="$1" room_id="$2" verif="$3"
+  registre_ajoute "$CREATE_IDORDER" "$CREATE_SID" "$CREATE_TS" "$marque" "$room_id" "a_nettoyer"
+  jaune "  #$CREATE_IDORDER inscrite au registre, à nettoyer par --nettoyer"
+  noter "$verif KO ($marque) réservation #$CREATE_IDORDER insérée malgré le code $VIK_LAST_CODE, inscrite au registre à nettoyer"
 }
 
 # ============================================================== annulation
@@ -447,6 +515,10 @@ verif3_garde_reservation() {
       registre_ajoute "$CREATE_IDORDER" "$CREATE_SID" "$CREATE_TS" "$marque" "$room_etranger" "a_nettoyer"
       noter "3a KO  chambre étrangère acceptée (réservation #$CREATE_IDORDER, à nettoyer)"
       ;;
+    creee_sur_erreur)
+      rouge "  KO   chambre étrangère (#$room_etranger) insérée en base (#$CREATE_IDORDER) avant l'erreur $VIK_LAST_CODE — la garde ne l'a pas arrêtée, FUITE DE MARQUE"
+      registre_ajoute_sur_erreur "$marque" "$room_etranger" "3a"
+      ;;
     *)
       jaune "  3a signal ambigu (statut '$CREATE_STATUT') — voir ci-dessus"
       noter "3a ??  signal ambigu"
@@ -464,7 +536,16 @@ verif3_garde_reservation() {
       registre_ajoute "$CREATE_IDORDER" "$CREATE_SID" "$CREATE_TS" "$marque" "$room_desactivee" "a_nettoyer"
       noter "3b KO  chambre désactivée acceptée (réservation #$CREATE_IDORDER, à nettoyer)"
       ;;
+    creee_sur_erreur)
+      rouge "  KO   chambre désactivée (#$room_desactivee) insérée en base (#$CREATE_IDORDER) avant l'erreur $VIK_LAST_CODE"
+      registre_ajoute_sur_erreur "$marque" "$room_desactivee" "3b"
+      ;;
     erreur)
+      if [ "$CREATE_ABSENCE" = "absence vérifiée en base" ]; then
+        jaune "  3b non concluant : la soumission finale a répondu $VIK_LAST_CODE, aucune réservation en base (absence vérifiée)"
+        noter "3b ??  non concluant (soumission finale en $VIK_LAST_CODE, absence vérifiée en base)"
+        return
+      fi
       jaune "  3b non concluant : la chambre désactivée n'a produit aucun tarif exploitable (probablement absente des résultats de recherche natifs de Vik, avail=0) — comportement natif, ne met pas la garde à l'épreuve par ce canal"
       noter "3b ??  non concluant (chambre désactivée absente des résultats natifs)"
       ;;
@@ -485,11 +566,21 @@ verif5_6_reservation_reelle() {
 
   vik_creer_reservation "$room_id" "$date_reelle" 1
 
-  if [ "$CREATE_STATUT" != "created" ]; then
-    rouge "  KO   la réservation d'essai n'a pas pu être créée (statut '$CREATE_STATUT')"
-    noter "5-6 KO ($marque) création impossible"
-    return
-  fi
+  case "$CREATE_STATUT" in
+    created) ;;
+    creee_sur_erreur)
+      rouge "  KO   réservation #$CREATE_IDORDER créée, mais la soumission finale a répondu $VIK_LAST_CODE : aucune page de paiement"
+      registre_ajoute_sur_erreur "$marque" "$room_id" "5-6"
+      return ;;
+    indetermine)
+      rouge "  KO   soumission finale en échec, et présence de la réservation indéterminée : chercher $CREATE_COURRIEL dans l'administration de Vik"
+      noter "5-6 KO ($marque) échec de la soumission finale, réservation peut-être créée ($CREATE_COURRIEL), hors registre"
+      return ;;
+    *)
+      rouge "  KO   la réservation d'essai n'a pas été créée (statut '$CREATE_STATUT', $CREATE_ABSENCE)"
+      noter "5-6 KO ($marque) réservation non créée, $CREATE_ABSENCE"
+      return ;;
+  esac
 
   vert "  réservation #$CREATE_IDORDER créée (sid=$CREATE_SID), en attente de paiement"
   registre_ajoute "$CREATE_IDORDER" "$CREATE_SID" "$CREATE_TS" "$marque" "$room_id" "en_attente_reprise"

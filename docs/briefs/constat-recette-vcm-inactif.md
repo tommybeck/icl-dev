@@ -44,7 +44,8 @@ cette valeur à la fin.
 | 8 | KO, attendu tant que G2 n'existe pas | |
 
 Le script rapporte pour les deux passes « la réservation d'essai n'a pas pu être
-créée ». **C'est faux**, voir le chapitre 4.
+créée ». **C'est faux**, voir le chapitre 4. Corrigé le 25 septembre, voir le
+chapitre 9.
 
 Le code de sortie n'a pas été relevé : la commande passait par `tee` sous zsh,
 où `PIPESTATUS` n'existe pas. Le défaut « sortie en `0` malgré des
@@ -78,10 +79,9 @@ Manager alors que WordPress ne charge plus le greffon. La constante
 `VIKCHANNELMANAGER_LIBRARIES` est définie par l'amorce du greffon. Désactivé,
 le greffon ne la définit plus, et le code chargé à la main plante.
 
-**Ce qu'elle suggère, sans que ce soit établi.** Vik Booking détecterait la
-présence de Vik Channel Manager par ses fichiers, pas par son statut
-d'activation. Cette conclusion vient de la trace seule : `vcm.php` n'a pas été
-lu.
+**Ce qu'elle suggérait, et qui est désormais établi (chapitre 7).** Vik Booking
+détecte la présence de Vik Channel Manager par ses fichiers, jamais par son
+statut d'activation.
 
 **Conséquence.** La parade posée ce matin contre l'incident, désactiver le
 greffon, empêche toute réservation de s'achever sur la préproduction. Les
@@ -127,7 +127,9 @@ avant la désactivation. Aucune ligne n'a été ajoutée depuis. L'erreur fatale
 arrive dans `getOrderDetails()`, pendant la préparation de la requête et avant
 son envoi.
 
-## 6. Ce qui reste à décider
+## 6. Ce qui restait à décider le 24 septembre
+
+*Les points 1 et 2 sont tranchés aux chapitres 8 et 9. Le texte d'origine est conservé.*
 
 1. **Rétablir la création de réservations sur la préproduction sans rouvrir
    la voie vers les plateformes.** Trois pistes, par ordre de préférence :
@@ -151,3 +153,145 @@ son envoi.
    fois l'absence vérifiée en base.
 3. **Nettoyer 1833, 1834 et 1835** dans l'administration de Vik. Thomas
    confirme d'abord l'origine de 1833.
+
+---
+
+## 7. Comment Vik Booking décide que Vik Channel Manager est présent
+
+25 septembre 2026. Lecture de Vik Booking **1.8.15 sur `staging13`**, par SSH, en
+lecture seule. La copie de `.local/vikbooking` est en **1.8.14** et n'est plus à
+jour. `site/helpers/vcm.php`, `site/controller.php` et
+`admin/helpers/src/autoload.php` sont identiques des deux côtés (même empreinte
+md5). `defines.php` et `site/helpers/lib.vikbooking.php` diffèrent, et les
+passages cités ont été relus sur le serveur.
+
+**Réponse : par les fichiers, et par eux seuls.** Aucune option, aucune
+constante posée par Vik Channel Manager, aucun statut d'activation n'est
+consulté.
+
+- **`vcm.php` ne décide rien.** `VboVcmInvoker::__construct()` (l. 52-55) charge
+  `synch.vikbooking.php` de Vik Channel Manager sans condition, et `doSync()`
+  appelle `SynchVikBooking->sendRequest()`. La décision est prise par
+  l'appelant.
+- **L'appelant de `saveorder()`** (`site/controller.php:1630`) :
+  `if (class_exists('VCMRequestAvailability'))`. C'est le seul test.
+- **`class_exists()` déclenche l'autochargeur de Vik Booking**
+  (`admin/helpers/src/autoload.php`). Pour toute classe préfixée `VCM`, il
+  calcule le chemin en remplaçant `vikbooking` par `vikchannelmanager` dans son
+  propre dossier (l. 66), puis inclut le fichier **s'il existe** (`is_file`,
+  l. 78-81). Le greffon désactivé a toujours ses fichiers : la classe se charge,
+  le test est vrai, et `doSync()` part.
+- **Les chemins `VCM_SITE_PATH` et `VCM_ADMIN_PATH`** sont posés par Vik Booking
+  lui-même (`defines.php:54-55`), déduits de son propre chemin. Ils ne dépendent
+  pas du chargement de Vik Channel Manager.
+- **La constante qui manque**, `VIKCHANNELMANAGER_LIBRARIES`, n'est posée que
+  par l'amorce de Vik Channel Manager. C'est pour cela que le code chargé à la
+  main plante.
+- **Le même critère partout.** Les deux autres appels de `saveorder()` et de
+  `notifypayment()` (`site/controller.php:1250` et `:2542`) testent
+  `is_file(VCM_SITE_PATH/helpers/synch.vikbooking.php)`. `vcmAutoUpdate()`
+  (`lib.vikbooking.php:1387`), l'impression de canal (`invokeChannelManager()`)
+  et une vingtaine d'autres emplacements testent `is_file` ou `file_exists` sur
+  `lib.vikchannelmanager.php`.
+- **Le réglage `vcmautoupd`** (« mise à jour automatique ») n'intervient que
+  dans `vcmAutoUpdate()`, donc dans les chemins de l'administration. Les trois
+  appels du frontal ne le consultent pas.
+
+**Conséquence pour la recette.** Tant que le dossier est sur le disque, désactiver
+le greffon n'empêche pas l'appel. Cela empêche seulement qu'il aboutisse : la
+réservation 1832, à 11:11, était partie avec le greffon actif. Celles de
+15:50 à 15:55 ont planté avant l'envoi (chapitre 5). **Le paiement par Stripe,
+s'il était allé au bout, aurait repassé par `notifypayment()` (l. 2542) avec le
+même critère.**
+
+## 8. La parade : retirer le greffon de la préproduction
+
+**C'est un geste de Thomas, pas de Claude Code.** Supprimer le dossier
+`wp-content/plugins/vikchannelmanager` de `staging13`, ou le **déplacer hors de
+`wp-content/plugins/`**, par Site Tools. Ne pas le renommer sur place : un
+`vikchannelmanager.off` dans `plugins/` reste un greffon que WordPress liste et
+qu'un clic réactiverait. Vik Booking ne le trouverait pas, mais Vik Channel
+Manager lui-même tournerait avec ses tâches planifiées et la configuration de la
+production.
+
+**Preuve que la réservation aboutit alors.** Le dossier absent, l'autochargeur
+renvoie `false` pour `VCMRequestAvailability`, donc le test de la ligne 1630 est
+faux et `doSync()` n'est pas appelé. Les tests `is_file` des lignes 1250 et 2542
+sont faux. `vcmAutoUpdate()` renvoie `-1`. Le chemin de la trace du chapitre 3
+n'est plus emprunté.
+
+**Preuve qu'aucune requête ne peut partir vers e4jConnect.**
+
+- Toutes les adresses d'e4jConnect vivent dans Vik Channel Manager. Par exemple
+  `executeARequest()` (`synch.vikbooking.php:499-510`), qui poste vers
+  `https://e4jconnect.com/channelmanager/?r=a&c=channels` par
+  `E4jConnectRequest`. Sans ses fichiers, ce code n'existe plus sur le serveur.
+- Vik Booking 1.8.15 ne contient aucune adresse d'e4jConnect qui serve à une
+  requête. Toutes celles du code sont des liens commerciaux, vérifié par
+  recherche. Ses fonctions qui passent par e4jConnect, l'IA par exemple
+  (`admin/controllers/ai.php:31-40`), exigent la classe `VikChannelManager` et
+  s'arrêtent sans elle.
+- Les deux mu-plugins présents sur `staging13` et absents du dépôt,
+  `api-host.php` et `vre-paid-autoconfirm.php`, ne contiennent ni `vcm`, ni
+  `synch`, ni `channel`, ni `e4j`, ni `curl`, ni `wp_remote`.
+
+**Les parades par mu-plugin sont écartées**, parce qu'aucune ne se prouve :
+
+- *Prédéfinir `VCM_SITE_PATH` vers un dossier vide.* `defines.php` le permet
+  (`defined() or define()`), mais l'autochargeur calcule le chemin des classes
+  `VCM*` sans cette constante (l. 66). Le test de la ligne 1630 resterait vrai,
+  et le constructeur de `VboVcmInvoker` planterait sur un `require_once`
+  introuvable. Il faudrait en plus déclarer une fausse `SynchVikBooking`, qui se
+  ferait passer pour une classe tierce. Et les autres classes `VCM*`, appelées
+  par l'administration lors du nettoyage des réservations en attente
+  (`setForRelease`, `admin/controller.php:3283` et `:7877`,
+  `admin/helpers/src/model/reservation.php:1663`), se chargeraient toujours
+  depuis le vrai dossier.
+- *Définir `VIKCHANNELMANAGER_LIBRARIES`.* Cela ferait disparaître l'erreur
+  fatale en laissant le code aller plus loin, jusqu'à l'envoi. Cela rouvre la
+  voie au lieu de la fermer.
+- *Bloquer le HTTP sortant par WordPress* (`pre_http_request`,
+  `WP_HTTP_BLOCK_EXTERNAL`). Vik Channel Manager passe par cURL directement
+  (`E4jConnectRequest`, et `curl_init` dans ses contrôleurs), pas par l'API HTTP
+  de WordPress. Un tel blocage ne l'arrêterait pas.
+- *Le réglage `vcmautoupd`.* Il n'est pas consulté par les appels du frontal
+  (chapitre 7). Le changer serait de plus une écriture en base.
+
+**Ce qui reste.** `modules/mod_vikbooking_otareviews/helper.php:274` charge
+`lib.vikchannelmanager.php` sans test. Si le module d'avis des plateformes est
+placé sur une page de `staging13`, cette page plantera une fois le dossier
+retiré. Ce n'est pas une voie vers l'extérieur, et sa présence sur une page
+n'est pas vérifiée. Les greffons maison `lme-vik-contacts-api` et `lme-vik-ics`
+restent à inventorier, comme le demande l'incident.
+
+**Au plan de marche** (tenu par Cowork) : l'étape obligatoire de la recréation
+de la préproduction devient « retirer le dossier `vikchannelmanager` », et non
+plus seulement « désactiver ». Le préalable de `recetter-moteur.sh` accepte
+déjà l'état `absent` (`vcm_statut_acceptable`). Il n'a pas à changer.
+
+## 9. Correction du script : plus de « non créée » sans lecture en base
+
+`recetter-moteur-vik.sh` et `recetter-moteur.sh`, 25 septembre 2026.
+
+- L'adresse de recette générée à la soumission (`recette+<epoch>@…`, unique à la
+  seconde) est conservée. Après un code HTTP inattendu à la soumission finale,
+  ou une réponse sans `sid`, le script cherche en base la réservation qui la
+  porte, par une nouvelle aide distante `orders-from-email` (`SELECT id, sid,
+  ts, status` sur `sir_vikbooking_orders`, en lecture seule).
+- Trois issues, chacune dite au rapport :
+  - **trouvée** : statut `creee_sur_erreur`. La réservation est inscrite au
+    registre, à nettoyer, donc vue par `--nettoyer`. Le rapport dit « insérée
+    malgré le code 500 ». En 3a, c'est une fuite de marque, rapportée en KO ;
+  - **absente** : « non créée, absence vérifiée en base » ;
+  - **relecture impossible**, ou plusieurs lignes : statut `indetermine`. Le
+    rapport ne conclut pas et donne l'adresse à chercher dans Vik.
+- Un échec avant la soumission finale (aucun tarif, page incomplète) est
+  rapporté « soumission finale non envoyée » : aucune insertion n'était
+  possible.
+- **Vérifié** : sur `staging13`, l'aide renvoie `NROWS=0` pour une adresse
+  inexistante, et retrouve la 1834, en `standby`, par son adresse de recette.
+  La logique de décision est testée hors ligne sur les quatre cas : aucune
+  ligne, une, deux, panne de la lecture. **Pas de recette complète rejouée** :
+  elle recréerait une réservation en attente sur une préproduction qui
+  plante tant que le dossier est là.
+- Le défaut B9i du code de sortie en `0` n'est pas traité ici.

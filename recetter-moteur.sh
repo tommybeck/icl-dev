@@ -284,6 +284,25 @@ case "$MODE" in
     exit 0
     ;;
 
+  orders-from-email)
+    # Après une soumission finale en erreur (500 du 24 septembre 2026 :
+    # l'insertion précède l'appel à Vik Channel Manager qui plante,
+    # constat-recette-vcm-inactif.md §4), la page ne porte aucun sid : la
+    # réservation se retrouve par l'adresse de recette que le script vient de
+    # générer, unique à la seconde (recette+<epoch>@…). id, sid, ts, status :
+    # données structurelles non secrètes, comme pour order-id-from-sid.
+    # Un échec de la requête sort en erreur, jamais en liste vide : une
+    # absence n'est affirmée que si la base a répondu.
+    COURRIEL="$3"
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    Q="SELECT id, sid, ts, status FROM sir_vikbooking_orders WHERE custmail = '$(printf '%s' "$COURRIEL" | sed "s/'/''/g")' ORDER BY id"
+    ROWS=$(wp db query "$Q" --path="$BASE" --skip-column-names 2>/dev/null) \
+      || { err "wp db query a échoué : présence de la réservation indéterminée"; exit 1; }
+    kv NROWS "$(printf '%s\n' "$ROWS" | grep -c . || true)"
+    kv ROWS "$(printf '%s' "$ROWS" | tr '\n\t' ';:')"
+    exit 0
+    ;;
+
   cron-run)
     HOOK="$3"
     command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
