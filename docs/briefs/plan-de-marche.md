@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.18, 24 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.18 reconstruit une révision perdue au commit `bec2ac9`, et consigne l'incident de la préproduction vers les plateformes, réparé le jour même.
+**Version 2.19, 25 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.19 remplace la désactivation de Vik Channel Manager par son retrait de la préproduction, et fait d'Opus 5.5 le modèle par défaut de Code.
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -18,7 +18,7 @@ Ce n'est pas une répartition par difficulté, c'est une répartition par **mati
 | **Écrit dans** | `mu-plugins/`, `themes/`, `docs/constat-*.md` | `docs/brief-*.md`, `docs/revue-*.md`, `docs/plan-de-marche.md` |
 | **Lit** | tout le dépôt, `.local/` en lecture seule | tout le dépôt, par le miroir en lecture seule |
 | **Ne fait jamais** | écrire dans Airtable ou Make, déployer en production, modifier `.local/` | écrire une ligne de code du dépôt |
-| **Modèle** | Sonnet 5 par défaut, Opus 5 sur les tâches marquées | Opus 5 |
+| **Modèle** | **Opus 5.5, effort moyen, par défaut** depuis le 25 septembre ; effort bas pour le mécanique, élevé sur les tâches marquées ; Sonnet 5 seulement pour les recherches en lecture seule | Opus 5.5 |
 
 **Thomas seul** touche aux identifiants, au DNS, à Site Tools, aux comptes Stripe et Google, et à l'administration de Vik. Ni l'un ni l'autre des deux outils ne demande, ne détient ni ne saisit un secret.
 
@@ -148,6 +148,14 @@ Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette r
 **Ne pas toucher au réglage.** Le basculer ne débloquerait rien pour le script, et le faire un jour en production changerait le parcours des clients sans raison.
 
 **Et une promesse de mon brief qui ne tenait pas.** J'avais posé que `--nettoyer` annulerait les réservations d'essai par le contrôleur de Vik. `task=docancelbooking` exige `status = 'confirmed'` : une commande `standby` y répond `403`, testé pour de vrai. **La règle de nettoyage change donc** : ce que le script ne peut pas annuler, il le **marque et le recense**, et la reprise revient à l'administration de Vik ou au balayage de la parade D. Deux réservations restent sur la préproduction, **1826** et **1827**, au nom `RECETTE AUTOMATISEE - NE PAS TRAITER`, sans paiement.
+
+### Vik Channel Manager se retire, il ne se désactive pas — 25 septembre
+
+`constat-recette-vcm-inactif.md`. La désactivation posée contre l'incident faisait planter **toute** réservation sur la préproduction : dans `saveorder()`, Vik Booking teste `class_exists('VCMRequestAvailability')`, que son propre autochargeur satisfait **dès que les fichiers existent**, puis charge Vik Channel Manager à la main, qui plante faute de sa constante d'amorce. Les autres appels, dont `notifypayment()`, testent la présence d'un fichier. **Établi par lecture de Vik Booking 1.8.15 sur la préproduction.**
+
+**La parade est de retirer le dossier**, geste de Thomas, chapitre 4. Sans les fichiers, aucun des trois appels du frontal n'est pris, et aucune adresse d'e4jConnect n'existe plus sur le serveur. Les parades par mu-plugin sont écartées faute de pouvoir se prouver. **Seul effet connu** : une page qui porterait le module d'avis des plateformes planterait. Aucune n'est vérifiée comme le portant.
+
+Le script ne déclare plus « non créée » une réservation insérée malgré une erreur : il la cherche en base par son adresse d'essai. **À noter aussi** : la copie `.local/vikbooking` est en 1.8.14, la préproduction en 1.8.15.
 
 ### Incident — la préproduction a poussé sa disponibilité vers les plateformes — 24 septembre
 
@@ -459,7 +467,8 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 
 1. **Recréer la préproduction depuis la production. Fait le 20 septembre**, sous `staging13`. À refaire dès qu'elle aura dérivé : une recette menée sur une copie périmée ne prouve rien de la production.
 2. **Après chaque recréation, avant toute autre chose**, neutraliser tout ce que la copie ramène de la production et qui écrit vers l'extérieur. **C'est une étape obligatoire depuis l'incident du 24 septembre**, détaillée au §5 de `constat-integrations-sortantes.md` :
-   - **Plugins** : désactiver **Vik Channel Manager** et **MailPoet** ;
+   - **Site Tools → File Manager** : **supprimer** le dossier `wp-content/plugins/vikchannelmanager`, ou le déplacer **hors de `public_html`**. Le désactiver ne suffit pas : Vik Booking détecte Vik Channel Manager **par ses fichiers**, jamais par son statut d'activation, et un greffon désactivé fait planter toute réservation (`constat-recette-vcm-inactif.md` §7 et §8). Ne pas le renommer sur place, ni le déplacer ailleurs sous `public_html`, où ses fichiers PHP resteraient exécutables par une simple requête. Une recréation de la préproduction le ramène de toute façon ;
+   - **Plugins** : désactiver **MailPoet** ;
    - **Plugins** : désactiver aussi **WooCommerce Payments** et **PayPal** (`pymntpl-paypal-woocommerce`). La copie ramène WooPayments en **mode réel, sur le compte de production**, et aucune bascule en mode test n'apparaît dans ses réglages sur cette installation, constaté par Thomas le 24 septembre. La recette du moteur n'utilise pas WooCommerce : le désactiver ne coûte rien et ferme la question ;
    - **VikStripe** : clés de test ;
    - **TranslatePress → Settings → Automatic Translation** : désactiver, pour ne pas consommer de crédits DeepL sur la préproduction ;
@@ -547,6 +556,8 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 
 ## 7. Le rythme
 
+**Le modèle de Code, décision du 25 septembre.** Opus 5.5 effort moyen par défaut, sur la recommandation d'Anthropic du 22 septembre : Opus 5.5 pour écrire du code, Sonnet ou Haiku pour les recherches, effort bas plutôt qu'un modèle plus petit pour le mécanique. Le prix par jeton est double de celui de Sonnet 5, mais un essai raté coûte plus que l'écart. Les en-têtes des prompts écrits avant cette date indiquent encore Sonnet 5 : **lire Opus 5.5 au même effort.** À mesurer par `/usage` sur une tâche réelle plutôt qu'à croire.
+
 **Consigne à porter dans chaque prompt, décision du 24 septembre.** *Établis les prémisses que tu utilises contre leur source ; ne les reprends pas d'un constat ni d'un brief sans les revérifier.* Le seul échec sérieux de ce chantier, la phase 4 qui cassait tout paiement, vient d'une prémisse fausse reprise d'un constat, pas d'un défaut de modèle — et Cowork a commis la même faute deux fois en deux jours, en Opus. **Le modèle n'est pas la variable ; la vérification des prémisses l'est.** C'est ce que B9c et B9d ont démontré en faisant l'inverse.
 
 Une phase, une session, un commit, une revue. Ne jamais enchaîner deux phases sans revue : c'est en enchaînant qu'on livre une phase 2 bâtie sur une phase 1 fausse.
@@ -561,6 +572,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.19 | 2026-09-25 | Vik Channel Manager se **retire** de la préproduction au lieu de se désactiver : Vik Booking le détecte par ses fichiers, et désactivé il fait planter toute réservation. Opus 5.5 effort moyen devient le modèle par défaut de Code. |
 | 2.18 | 2026-09-24 | Recréation de la préproduction : WooCommerce Payments et PayPal **désactivés** plutôt que basculés en test ; régénération des clés des greffons maison et coupure de la traduction automatique **écartées**, motifs au chantier B. — **Reconstruction** d'une révision perdue au commit `bec2ac9`, restauré en 2.17 par `6156d9f`. **Incident** : Vik Channel Manager actif sur la préproduction a poussé chaque réservation d'essai vers Airbnb, Booking.com et Expedia ; exposition réelle établie par les calendriers partagés, L'Entracte et L'Aparté fermés ; réparé le jour même depuis la production. B9h, B11 et B9j livrés et revus. Première reprise : le paiement de la phase 4 aboutit. Revue de B5. WooCommerce Payments trouvé en mode réel sur la préproduction. Chapitre 4 : recréation de la préproduction réécrite. Ajout de B9i, B11b. |
 | 2.17 | 2026-09-24 | Première recette complète en deux passes. La vérification 2 cherche le nom dans toute la page, menu compris : son KO est garanti par construction, et seule `roomdetails` est établie pour de vrai. B11 corrige aussi la mesure. La garde rend un signal ambigu en passe L'Instant Clé, le sens qui protège la marque qui vend : ajout de B9h, avant B11. |
 | 2.16 | 2026-09-24 | B11 redevient bloquant pour B10. Vérification complète au navigateur, avec et sans le paramètre : un seul composant Vik par page, aucun formulaire superflu dans le DOM, mais le formulaire **visible** bascule sur la chambre étrangère. Sans B11, le déploiement transformerait un parcours qui aboutit aujourd'hui en impasse à `403`. La 2.15 concluait l'inverse sur la foi du seul bloc descriptif masqué. |
