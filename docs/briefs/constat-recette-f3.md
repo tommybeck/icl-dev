@@ -161,41 +161,154 @@ Règles décodées localement depuis l'hexadécimal :
 
 ---
 
-## 5. Chapitre 4 : non rejoué
+## 5. Chapitre 4 : rejoué le 26 septembre à 10:12 UTC
 
-Rien n'a été déclenché. La tâche 7 ne retient que les réservations
-`confirmed` (`admin/cronjobs/email_reminder.php`, clause `o.status`), et
-1434, 1823 et 1838 sont déjà marquées comme notifiées. Il faut donc trois
-nouvelles réservations confirmées. Thomas a demandé que Code les crée dans
-l'administration de Vik sur `staging13`. **La politique de permissions de
-cette session l'a refusé**, dès la lecture du code de création de
-réservation de l'administration. Code n'a pas cherché de contournement.
+Une première tentative n'avait rien déclenché : la tâche 7 ne retient que
+les réservations `confirmed`, 1434, 1823 et 1838 étaient déjà notifiées, et
+la politique de permissions de la session avait refusé à Code la création de
+réservations. Cowork a ensuite créé trois réservations d'essai confirmées sur
+`staging13` : 1839, 1840 et 1841. Le chapitre 4 a été rejoué sur ces trois
+réservations, en suivant l'ancien « Pour reprendre ».
 
-### Pour reprendre
+**Méthode.** La méthode est celle du §1 de `constat-verification-7.md` : SSH,
+`wp eval-file -`, valeurs de décision en hexadécimal. Code n'a rien écrit en
+base. Il n'a rien déployé non plus. Aucun bloc rendu n'est recopié ici. Chaque
+bloc a été extrait sur le serveur du `content_html` que WP Mail SMTP journalise
+(`log_email_content = true`), puis comparé au `msg` des textes conditionnels :
+par SHA-256 d'abord, puis après normalisation des entités et des espaces, et,
+pour le plan, par le nom du fichier image. Une valeur non secrète est donnée
+par son empreinte. Le code de porte, lui, est donné comme vide ou non, avec le
+jeton qui l'a produit, **sans empreinte ni longueur** : un code court se
+retrouverait à partir de son empreinte.
 
-1. **Créer trois réservations confirmées sur `staging13`, dans
-   l'administration de Vik** (Cowork ou Thomas). Nom
-   « RECETTE F3 NE PAS TRAITER », adresse
-   `recette+f3-<chambre>@recette-automatisee.icl-dev.invalid`.
-   Disponibilités relevées à 09:5x UTC :
+**Incident de lecture.** Une première lecture du champ `logs` de la tâche 7
+a pris un extrait trop large. Le champ est rangé du plus récent au plus
+ancien, et l'extrait a ramené tout l'historique dans la session de Code,
+avec les noms des clients. Les adresses étaient masquées. Rien de cet
+historique n'est recopié ici ni ailleurs.
 
-   | Chambre | Arrivée | Départ | Pourquoi ces dates |
-   |---|---|---|---|
-   | 4, Le Boudoir du Désir | 27.09 | 28.09 | libre entre 1434 (départ le 27.09 à 11:00) et 1824 (arrivée le 29.09) |
-   | 10, À Huis Clos (ou 7) | 27.09 | 28.09 | 1823 arrive le 28.09 à 16:00 |
-   | 8 ou 9 | 27.09 | 28.09 | libres |
+### 5.1 Préalables, revérifiés à 10:11 UTC
 
-   Une arrivée le 27.09 tombe dans la fenêtre d'un déclenchement le 26.09
-   (du 26 au 28) comme le 27.09 (du 27 au 29).
-2. **Code revérifie** les préalables de `constat-verification-7.md` §1 :
-   `staging`, Vik Channel Manager absent, `lme-mail-guard` en place avec la
-   fourre-tout résolue, « Do not send » à `false`, `test = OFF`. Il liste
-   la fenêtre, qui ne doit contenir que les trois nouvelles réservations,
-   puis lance **une fois** `wp cron event run vikbooking_cron_email_reminder_7`.
-3. **Relire dans la fourre-tout** qu'il n'y a aucun blanc dans l'heure,
-   l'adresse, le nom de la chambre, la place et le plan. Le code de porte
-   des suites reste vide tant que Thomas ne l'a pas saisi.
-4. Annuler ensuite les trois réservations, comme les autres essais.
+| Préalable | Résultat |
+|---|---|
+| `wp_get_environment_type()`, en hexadécimal | `staging`. Option `home` : `https://staging13.linstantcle.ch` |
+| Vik Channel Manager | dossier absent, 0 greffon listé |
+| `lme-mail-guard` | les cinq fichiers hors tests ont le même md5 sur le serveur et dans le dépôt |
+| `LME_MAIL_GUARD_CATCHALL_EMAIL` | définie, non vide, résolue. La valeur n'a pas été lue. |
+| « Do not send » | `false` |
+| Mailer, forçage du `From` et du nom | `gmail`, `false`, `false` |
+| Tâche 7 | publiée, `checktype = checkin`, `remindbefored = 2`, `less_days_advance = 1`, `ota_res = 1`, `test = OFF`, `listings` absent. SHA-256 de `tpl_text` : `44b2f30a…909d`, l'empreinte « après » de la recette |
+| Fuseau PHP, `DISABLE_WP_CRON` | `UTC`, `true` |
+
+### 5.2 La fenêtre, listée avant le déclenchement
+
+Elle est calculée comme dans `execute()` : du **26.09 00:00:00 UTC au
+28.09 23:59:59 UTC**. `flag_char` comptait alors 271 identifiants.
+
+| Réservation | Arrivée (UTC) | Départ | État | Chambre | Marque (`lme-brands`) | Destinataire | Dans la fenêtre | Déjà notifiée |
+|---|---|---|---|---|---|---|---|---|
+| 1817 | 25.09 15:00 | 26.09 11:00 | confirmed | 4 | sexcaperoom | …@gmail.com | non | non |
+| 1490 | 25.09 15:02 | 27.09 11:00 | confirmed | 1 | linstantcle | …@gmail.com | non | non |
+| 1434 | 26.09 15:00 | 27.09 11:00 | confirmed | 4 | sexcaperoom | …@gmail.com | oui | **oui** |
+| 1812 | 27.09 15:00 | 28.09 11:00 | cancelled | 2 | linstantcle | Airbnb | non, annulée | non |
+| 1838 | 27.09 15:00 | 28.09 11:00 | confirmed | 2 | linstantcle | recette | oui | **oui** |
+| **1841** | 27.09 15:00 | 28.09 12:00 | confirmed | **8** | **linstantcle** | `recette+f3-8@…` | **oui** | **non** |
+| **1840** | 27.09 16:00 | 28.09 12:00 | confirmed | **10** | **sexcaperoom** | `recette+f3-10@…` | **oui** | **non** |
+| **1839** | 28.09 15:00 | 29.09 11:00 | confirmed | **4** | **sexcaperoom** | `recette+f3-4@…` | **oui** | **non** |
+| 1823 | 28.09 16:00 | 29.09 12:00 | confirmed | 10 | sexcaperoom | …@gmail.com | oui | **oui** |
+| 1824 | 29.09 15:00 | 30.09 11:00 | confirmed | 4 | sexcaperoom | …@gmail.com | non | non |
+
+Dans la fenêtre, **1839, 1840 et 1841 sont les seules réservations non
+encore notifiées**. La condition était remplie, la tâche a été déclenchée.
+
+### 5.3 Le déclenchement
+
+```
+2026-09-26T10:12:34Z
+$ wp cron event run vikbooking_cron_email_reminder_7
+Executed the cron event 'vikbooking_cron_email_reminder_7' in 2.259s.
+Success: Executed a total of 1 cron event.
+EXIT=0
+```
+
+La tâche a été lancée une fois, sur `staging13` seulement. Journal de Vik :
+trois lignes `eMail sent to recette+f3-<chambre>@… - Booking ID 1839 / 1840 /
+1841 (RECETTE F3 NE PAS TRAITER)`, horodatées 10:12:38. Aucune autre
+réservation n'a été touchée, et 1434, 1823 et 1838 n'ont pas reçu de
+second message.
+
+### 5.4 Les trois messages
+
+Il y a deux relevés, et ils concordent : la transcription du garde-fou
+(lignes 15 à 17) et le journal de WP Mail SMTP (lignes 10 à 12). Sur les
+trois messages, l'état est 1, le mailer est `gmail` et `error_text` est vide.
+Le destinataire final est unique, la fourre-tout (comparaison faite sur le
+serveur), sans Cc ni Bcc. L'objet est « Infos de dernière minute pour votre
+séjour ».
+
+| Réservation | Ligne du journal | `From` composé | `Reply-To` | `X-Original-To` |
+|---|---|---|---|---|
+| 1839, chambre 4 | 10 | `Sexcape Room <reservations@sexcaperoom.ch>` | …@maisonnette-enchantee.ch | `recette+f3-4@…` |
+| 1840, chambre 10 | 11 | `Sexcape Room <reservations@sexcaperoom.ch>` | …@maisonnette-enchantee.ch | `recette+f3-10@…` |
+| 1841, chambre 8 | 12 | `L'Instant Clé <reservations@linstantcle.ch>`, encodé en Q | …@maisonnette-enchantee.ch | `recette+f3-8@…` |
+
+Chaque `From` est celui de la marque que le registre donne à la chambre.
+
+Aucun des trois corps ne contient plus de jeton `{condition: …}`, de
+`{balise}` ni de `{{LINE_…}}`.
+
+**Les six blocs, et le code de porte.** Pour chaque case, le jeton dont le
+`msg` a produit le bloc, suivi de l'empreinte (16 premiers caractères du
+SHA-256).
+
+| Bloc | 1839, chambre 4, Boudoir | 1840, chambre 10, Huis Clos | 1841, chambre 8, La Parenthèse |
+|---|---|---|---|
+| Heure d'arrivée | `checkin_time_maisonnette`, `5f66259e…` = `15:00` | `checkin_time_cinema`, `5d2b616b…` = `16:00` | `checkin_time_suites`, `5f66259e…` = `15:00` |
+| Heure de départ | `checkout_time_maisonnette`, `17ea4724…` = `11:00` | `checkout_time_cinema`, `9616672e…` = `12:00` | `checkout_time_suites`, `9616672e…` = `12:00` |
+| Adresse | `address_maisonnette`, `eee143b0…` | `address_cinema`, `92ac10b9…` | `address_cinema`, `92ac10b9…` |
+| Nom de la chambre | `room_name_boudoir`, `2d889524…` | `room_name_huis_clos`, `d368449c…` | `room_name_la_parenthse`, `6be601cb…` |
+| Place | `parking_space_maisonnette` (texte identique, balises près), `84cc05b8…` | `parking_space_cinema`, `a644fc53…` | `parking_space_cinema`, `a644fc53…` |
+| Plan | une image, `Carte-parking-entree-Maisonnette-Enchantee.jpg` | une image, `Carte-parking-entree-Cinema-Enchante.jpg` | une image, `Carte-parking-entree-Cinema-Enchante.jpg` |
+| Code de porte | **plein**, `front_door_pin_maisonnette` | **plein**, `front_door_pin_cinema` | **vide**, `front_door_pin_suites` |
+| Complément « faire votre nid » | `at_room_name_boudoir` (second `<b>`) | `at_room_name_huis_clos`, `0080dfdf…` | `at_room_name_la_parenthse`, `0eb87c48…` |
+
+Les heures ont été identifiées en comparant l'empreinte du bloc à celle de
+la chaîne, calculée localement. Elles concordent avec les heures
+d'arrivée et de départ enregistrées dans chaque réservation. Dans le
+`msg`, le plan est donné par un chemin relatif. Dans le message envoyé, il
+pointe vers `staging13.linstantcle.ch`.
+
+**Aucun blanc** dans l'heure d'arrivée, l'heure de départ, l'adresse, le
+nom de la chambre, la place et le plan, pour aucune des trois chambres.
+**Le code de porte des suites est vide**, comme prévu. Le Boudoir ne
+reçoit plus « L'Aparté ». La chambre 10 reçoit l'heure, l'adresse, la
+place, le plan et le code de L'Entracte. La chambre 8 reçoit l'adresse,
+la place et le plan de L'Entracte, et ses propres heures.
+
+### 5.5 Ce que le déclenchement a écrit, par Vik et WP Mail SMTP
+
+- `sir_vikbooking_cronjobs`, id 7 : `flag_char` passe de 271 à 274
+  identifiants, avec l'ajout de 1839, 1840 et 1841. `last_exec` vaut
+  2026-09-26 10:12:38 UTC, et `logs` reçoit le bloc du §5.3.
+- `sir_wpmailsmtp_emails_log`, lignes 10 à 12, adresses de recette seulement.
+- `wp-content/lme-mail-guard-envelopes.log`, lignes 15 à 17.
+- `wp-content/debug.log` : l'avertissement `host_override_used`, puis
+  trois `production_brand_host_redirected` qui attribuent à tort les trois
+  messages à `sexcaperoom`, 1841 comprise. C'est le même bruit que dans
+  `constat-verification-7.md` §6. Il n'y a eu ni erreur ni fatale. Une
+  dernière ligne `host_override_used`, à 10:13:32, vient de la lecture
+  faite par Code après le passage, et non de la tâche.
+
+### 5.6 Verdict
+
+**Côté serveur, le chapitre 4 est établi.** Un seul passage de la tâche 7
+a composé trois rappels, un par chambre visée par la recette. Chacun porte
+l'expéditeur de sa marque et ses six blocs, tous pleins, chacun produit
+par le texte conditionnel attendu. Le code de porte des suites est vide.
+
+Un point reste hors de portée du serveur : **le message tel qu'il a été
+reçu**. Le mailer passe par l'API Gmail, qui peut réécrire le `From`
+(`constat-verification-7.md` §7). Le rendu visuel n'a pas été vu non plus.
 
 ---
 
@@ -219,6 +332,18 @@ réservation de l'administration. Code n'a pas cherché de contournement.
    `params` de la tâche 7, donc l'adresse `test_email`. Ils sont à purger
    avec la préproduction.
 5. **Brief** : corriger `class_file` au §2.3 (Cowork).
+6. **Réservations d'essai 1839, 1840 et 1841** : elles restent `confirmed`.
+   Cowork les annule, comme 1838.
+7. **Fourre-tout** (Thomas) : relire les trois messages reçus le 26.09 vers
+   10:12 UTC. Vérifier le rendu, les deux plans, et que le `From` n'a pas
+   été réécrit par Gmail.
+8. **Chambre 8 sous L'Instant Clé** : le registre `lme-brands` rattache la
+   chambre 8 à `linstantcle`, et 1841 est donc sortie en L'Instant Clé,
+   avec le logo du gabarit. La recette F3 n'y touche pas. Si les suites
+   doivent sortir sous une autre marque, c'est une décision de registre, à
+   prendre par Thomas.
+9. **`debug.log` de `staging13`** : 214 Mo. Il est à purger avec la
+   préproduction.
 
 ---
 
@@ -227,3 +352,7 @@ réservation de l'administration. Code n'a pas cherché de contournement.
 - 26 septembre 2026 : première version. Recette appliquée sur `staging13`,
   rollback éprouvé, vérification par requête. Chapitre 4 en attente de
   réservations d'essai.
+- 26 septembre 2026 : chapitre 4 rejoué sur 1839, 1840 et 1841, une
+  exécution de la tâche 7 à 10:12:34 UTC. Les six blocs sont pleins pour
+  les chambres 4, 10 et 8, et le code de porte des suites est vide. §5
+  réécrit, points ouverts 6 à 9 ajoutés.
