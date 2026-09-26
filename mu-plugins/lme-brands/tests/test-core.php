@@ -1123,6 +1123,171 @@ lme_brands_test_assert(
 	'la forme corrigée (payment-brand.php:87, is_object($payment) sur l\'argument reçu directement) reconnaît l\'objet de paiement sans lever d\'erreur'
 );
 
+// --- Vues de Vik joignables par `view`, relevé du 26 septembre 2026 -------------
+//
+// constat-vues-vik-par-view.md. Carte idcat relevée sur staging13 le même jour
+// (sir_vikbooking_rooms, id et idcat seuls) ; décisions contre le registre réel.
+
+lme_brands_test_assert(
+	'availability' === lme_brands_normalize_vik_cmd( ' Availability ' )
+		&& 'roomslist' === lme_brands_normalize_vik_cmd( ".roomslist\t" )
+		&& 'site' === lme_brands_normalize_vik_cmd( 'site ' )
+		&& '' === lme_brands_normalize_vik_cmd( array( 'promotions' ) ),
+	'normalize_vik_cmd : nettoyage cmd de Vik, minuscules, chaîne vide pour un tableau'
+);
+lme_brands_test_assert(
+	2 === lme_brands_vik_filter_int( '2abc' )
+		&& 2 === lme_brands_vik_filter_int( 'x2' )
+		&& 4 === lme_brands_vik_filter_int( '4,2' )
+		&& -2 === lme_brands_vik_filter_int( '-2' )
+		&& 0 === lme_brands_vik_filter_int( 'abc' ),
+	'vik_filter_int : premier nombre signé de la valeur, 0 sinon, comme le filtre int de Vik'
+);
+lme_brands_test_assert(
+	array( 4, 2, 0 ) === lme_brands_vik_filter_int( array( '4', '2abc', array( '9' ) ) ),
+	"vik_filter_int : élément par élément dans un tableau, un tableau imbriqué vaut 0"
+);
+
+$staging_idcat = array( 1 => '1;', 2 => '1;', 4 => '3;', 5 => '1;', 6 => '', 7 => '1;', 8 => '4;', 9 => '3;', 10 => '' );
+
+lme_brands_test_assert(
+	array( 1 => array( '1' ), 2 => array( '1' ), 4 => array( '3' ), 5 => array( '1' ), 6 => array(), 7 => array( '1' ), 8 => array( '4' ), 9 => array( '3' ), 10 => array() )
+		=== lme_brands_room_category_tokens_from_idcat( $staging_idcat ),
+	'room_category_tokens_from_idcat : jetons de chaque chambre, jetons vides retirés'
+);
+
+lme_brands_test_assert(
+	null === lme_brands_view_room_selection( 'roomdetails', array( 'roomid' => '2' ), $staging_idcat )
+		&& null === lme_brands_view_room_selection( 'searchdetails', array( 'roomid' => '2' ), $staging_idcat )
+		&& null === lme_brands_view_room_selection( 'booking', array(), $staging_idcat ),
+	"view_room_selection : les vues qui ne listent pas selon la requête seule ne sont pas gardées ici (null)"
+);
+
+// availability
+lme_brands_test_assert(
+	array( 4, 2 ) === lme_brands_view_room_selection( 'availability', array( 'room_ids' => array( '4', '2abc' ) ), $staging_idcat )
+		&& array( 4, 2 ) === lme_brands_view_room_selection( 'availability', array( 'room_ids' => array( '4', 'x2' ) ), $staging_idcat ),
+	"view_room_selection : availability lit room_ids[]=2abc et x2 comme Vik, soit la chambre 2 (mesuré : 2 et 4 rendues sous B11)"
+);
+lme_brands_test_assert(
+	array( 4 ) === lme_brands_view_room_selection( 'availability', array( 'room_ids' => '4,2' ), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'availability', array(), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'availability', array( 'room_ids' => array( '0', 'abc' ) ), $staging_idcat ),
+	'view_room_selection : availability, une chaîne vaut son premier nombre, sans sélection la liste est vide'
+);
+
+// roomslist
+lme_brands_test_assert(
+	array( 8 ) === lme_brands_view_room_selection( 'roomslist', array( 'category_id' => '4' ), $staging_idcat )
+		&& array( 4, 9 ) === lme_brands_view_room_selection( 'roomslist', array( 'category_id' => 'x3' ), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'roomslist', array( 'category_id' => array( '3' ) ), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'roomslist', array(), $staging_idcat ),
+	'view_room_selection : roomslist, catégorie lue par le filtre int de Vik, tableau ou absence donnent une liste vide'
+);
+
+// loginregister
+lme_brands_test_assert(
+	array( 2 ) === lme_brands_view_room_selection( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( '2' ) ), $staging_idcat )
+		&& array( 2 ) === lme_brands_view_room_selection( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( 0 => '2abc' ) ), $staging_idcat ),
+	'view_room_selection : loginregister lit roomid[indice] par intval(), comme Vik'
+);
+lme_brands_test_assert(
+	array( 4 ) === lme_brands_view_room_selection( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( '4', '2' ) ), $staging_idcat )
+		&& array( 4, 2 ) === lme_brands_view_room_selection( 'loginregister', array( 'roomsnum' => '2', 'roomid' => array( '4', '2' ) ), $staging_idcat ),
+	"view_room_selection : loginregister ne compte que les indices inférieurs à roomsnum, ceux que Vik lit"
+);
+lme_brands_test_assert(
+	array( 1 ) === lme_brands_view_room_selection( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( array( 'x' ) ) ), $staging_idcat )
+		&& array( 2, 4 ) === lme_brands_view_room_selection( 'loginregister', array( 'roomsnum' => '2', 'roomid' => '24' ), $staging_idcat ),
+	"view_room_selection : loginregister, un tableau imbriqué vaut la chambre 1 et une chaîne se lit caractère par caractère, comme chez Vik"
+);
+lme_brands_test_assert(
+	array() === lme_brands_view_room_selection( 'loginregister', array( 'roomid' => array( '4' ) ), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'loginregister', array( 'roomsnum' => '1' ), $staging_idcat ),
+	'view_room_selection : loginregister sans roomsnum ou sans roomid donne une liste vide'
+);
+
+// searchsuggestions
+lme_brands_test_assert(
+	array( 4, 6, 9, 10 ) === lme_brands_view_room_selection( 'searchsuggestions', array( 'categories' => '3' ), $staging_idcat ),
+	'view_room_selection : searchsuggestions garde la catégorie demandée et les chambres sans catégorie, comme Vik'
+);
+lme_brands_test_assert(
+	array( 1, 2, 5, 6, 7, 10 ) === lme_brands_view_room_selection( 'searchsuggestions', array( 'categories' => '1' ), $staging_idcat ),
+	"view_room_selection : searchsuggestions, catégorie 1 : la chambre 10, sans catégorie, en fait partie"
+);
+lme_brands_test_assert(
+	array() === lme_brands_view_room_selection( 'searchsuggestions', array(), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'searchsuggestions', array( 'categories' => 'all' ), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'searchsuggestions', array( 'categories' => '0' ), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'searchsuggestions', array( 'categories' => ' 3' ), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'searchsuggestions', array( 'categories' => array( '3' ) ), $staging_idcat ),
+	"view_room_selection : searchsuggestions sans catégorie numérique donne une liste vide, toute autre forme aussi"
+);
+lme_brands_test_assert(
+	array() === lme_brands_view_room_selection( 'searchsuggestions', array( 'categories' => '3' ), array() )
+		&& array() === lme_brands_view_room_selection( 'roomslist', array( 'category_id' => '3' ), array() ),
+	'view_room_selection : sans carte des catégories, les vues qui en dépendent donnent une liste vide, donc fermée'
+);
+
+// promotions
+lme_brands_test_assert(
+	array() === lme_brands_view_room_selection( 'promotions', array(), $staging_idcat )
+		&& array() === lme_brands_view_room_selection( 'promotions', array( 'showrooms' => '1', 'room_ids' => array( '4' ) ), $staging_idcat ),
+	"view_room_selection : promotions n'est jamais restreinte par la requête"
+);
+
+// Décision complète contre le registre réel : la vue est gardée si la liste
+// n'est pas vide et qu'aucune chambre n'est étrangère.
+$real_resolver = function ( $room_id ) use ( $real_config ) {
+	return lme_brands_resolve_room( $real_config, $room_id );
+};
+$view_kept = function ( $view, array $request, $brand ) use ( $staging_idcat, $real_resolver ) {
+	$ids = lme_brands_view_room_selection( $view, $request, $staging_idcat );
+	return array() !== $ids && null === lme_brands_first_foreign_room( $ids, $real_resolver, $brand );
+};
+
+lme_brands_test_assert(
+	2 === lme_brands_first_foreign_room( array( 4, 2, 9 ), $real_resolver, 'sexcaperoom' )
+		&& null === lme_brands_first_foreign_room( array( 4, 9, 10 ), $real_resolver, 'sexcaperoom' )
+		&& 99 === lme_brands_first_foreign_room( array( 1, 99 ), $real_resolver, 'linstantcle' )
+		&& null === lme_brands_first_foreign_room( array(), $real_resolver, 'linstantcle' ),
+	"first_foreign_room : première chambre d'une autre marque ou inconnue du registre, null si toutes sont de la marque"
+);
+lme_brands_test_assert(
+	! $view_kept( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( '2' ) ), 'sexcaperoom' )
+		&& ! $view_kept( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( '4' ) ), 'linstantcle' ),
+	"décision : loginregister avec la chambre de l'autre marque est fermée, dans les deux sens (mesuré : fuite #2 et #4)"
+);
+lme_brands_test_assert(
+	$view_kept( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( '4' ) ), 'sexcaperoom' )
+		&& $view_kept( 'loginregister', array( 'roomsnum' => '1', 'roomid' => array( '2' ) ), 'linstantcle' ),
+	'décision : loginregister avec la chambre de la marque reste ouverte, dans les deux sens (redirection légitime, site/controller.php:215)'
+);
+lme_brands_test_assert(
+	! $view_kept( 'promotions', array(), 'sexcaperoom' ) && ! $view_kept( 'promotions', array(), 'linstantcle' ),
+	'décision : promotions est fermée dans les deux sens (mesuré : promotion 119, chambres des deux marques)'
+);
+lme_brands_test_assert(
+	! $view_kept( 'searchsuggestions', array(), 'sexcaperoom' ) && ! $view_kept( 'searchsuggestions', array(), 'linstantcle' ),
+	'décision : searchsuggestions sans catégorie est fermée dans les deux sens (mesuré : 1, 2, 4, 7, 8, 9, 10 en suggestion)'
+);
+lme_brands_test_assert(
+	$view_kept( 'searchsuggestions', array( 'categories' => '3' ), 'sexcaperoom' )
+		&& ! $view_kept( 'searchsuggestions', array( 'categories' => '1' ), 'linstantcle' ),
+	"décision : searchsuggestions reste ouverte pour la catégorie 3 en Sexcape Room, fermée pour la catégorie 1 en L'Instant Clé à cause de la chambre 10, sans catégorie"
+);
+lme_brands_test_assert(
+	! $view_kept( 'availability', array( 'room_ids' => array( '4', '2abc' ) ), 'sexcaperoom' )
+		&& $view_kept( 'availability', array( 'room_ids' => array( '4' ) ), 'sexcaperoom' ),
+	"décision : availability avec room_ids[]=2abc est fermée en Sexcape Room, room_ids[]=4 reste ouverte"
+);
+lme_brands_test_assert(
+	$view_kept( 'roomslist', array( 'category_id' => '4' ), 'linstantcle' )
+		&& ! $view_kept( 'roomslist', array( 'category_id' => '4' ), 'sexcaperoom' ),
+	"décision : roomslist, catégorie 4 (chambre 8 seule) ouverte en L'Instant Clé, fermée en Sexcape Room (constat-correctif-room-filter.md)"
+);
+
 // --- Résultat -------------------------------------------------------------------
 
 $count    = $GLOBALS['lme_brands_test_count'];

@@ -699,9 +699,14 @@ verif1_resolution_marque() {
 # page rendait le KO garanti par construction (constat-correctif-room-filter.md).
 #
 # Identifiants relevés dans le conteneur :
-#   - champs de formulaire `roomdetail`, `roomid`, `room_ids[]`, `roomopt[]` ;
+#   - champs de formulaire `roomdetail`, `roomid`, `roomid[]`, `room_ids[]`,
+#     `roomopt[]` ;
 #   - résultats de recherche, `vbSelectRoom('n', 'idroom')` ;
-#   - paramètres `roomid` / `roomdetail` des liens ;
+#   - fiches de chambre de `searchsuggestions`, portées par la variable
+#     JavaScript `vbo_suggestions_<code>` du conteneur, jamais par un champ
+#     (constat-vues-vik-par-view.md) ;
+#   - paramètres `roomid` / `roomdetail` des liens, et liens vers la page
+#     d'une chambre, rapportés à elle par la table des shortcodes de Vik ;
 #   - chaque résultat de `roomslist` (`li.room_result`), dont le lien ne porte
 #     pas d'identifiant : il est rapporté à sa chambre par la table des
 #     shortcodes de Vik (page d'une vue roomdetails -> son roomid), la même
@@ -713,13 +718,20 @@ verif1_resolution_marque() {
 #
 # Témoin d'abord : la page propre, sans paramètre, doit proposer sa propre
 # chambre et elle seule. Sans témoin vert, la mesure n'est pas jugée.
+#
+# Vecteurs AJAX : `admin-ajax.php?action=vikbooking&vik_ajax_client=site&option=com_vikbooking&view=…`
+# rend n'importe quelle vue du site, sans défaut de shortcode et sans
+# conteneur (constat-vues-vik-par-view.md). Les identifiants y sont relevés
+# dans tout le corps, ou dans le HTML que porte la réponse JSON de
+# `getjson=1`. Le résultat attendu d'une vue fermée y est un 403.
 VERIF2_JOURS_RECHERCHE=75   # hors des dates des vérifications 3 (60) et 5-6 (90)
 VERIF2_MARQUES=""           # lignes id:empreinte_hex_de_la_marque
 VERIF2_PAGES_FICHIER="$ETAT_DIR/verif2-pages-vik.tsv"
 
 read -r -d '' VERIF2_EXTRACTEUR <<'PHP_EOF'
 <?php
-// $argv[1] : page HTML ; $argv[2] : roomid<TAB>post_id<TAB>post_name.
+// $argv[1] : page HTML ; $argv[2] : roomid<TAB>post_id<TAB>post_name ;
+// $argv[3] : 1 pour une réponse AJAX (corps entier, JSON de getjson=1).
 // Imprime « CONTENEURS n », puis une ligne « id origine » par identifiant,
 // ou « ? origine » pour un résultat qu'aucune page de chambre ne rapporte.
 $pages = array();
@@ -731,14 +743,23 @@ foreach ( (array) @file( $argv[2], FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES
 	}
 }
 libxml_use_internal_errors( true );
+$raw  = (string) @file_get_contents( $argv[1] );
+$json = json_decode( $raw, true );
+if ( is_array( $json ) && isset( $json[0] ) && is_string( $json[0] ) ) {
+	$raw = '<html><body>' . $json[0] . '</body></html>';
+}
 $doc = new DOMDocument();
-$doc->loadHTML( '<?xml encoding="UTF-8">' . (string) @file_get_contents( $argv[1] ) );
+$doc->loadHTML( '<?xml encoding="UTF-8">' . $raw );
 $xp  = new DOMXPath( $doc );
 $box = $xp->query( "//div[contains(concat(' ', normalize-space(@class), ' '), ' plugin-container ')]" );
+if ( 0 === $box->length && '1' === ( $argv[3] ?? '' ) ) {
+	// Réponse AJAX : pas de conteneur, le corps entier est la vue.
+	$box = $xp->query( '//body' );
+}
 echo 'CONTENEURS ', $box->length, "\n";
 $out = array();
 foreach ( $box as $c ) {
-	foreach ( $xp->query( ".//input[@name='roomdetail' or @name='roomid' or @name='room_ids[]' or @name='roomopt[]']", $c ) as $in ) {
+	foreach ( $xp->query( ".//input[@name='roomdetail' or @name='roomid' or @name='roomid[]' or @name='room_ids[]' or @name='roomopt[]']", $c ) as $in ) {
 		$v = trim( $in->getAttribute( 'value' ) );
 		if ( '' !== $v && ctype_digit( $v ) ) {
 			$out[] = $v . ' champ:' . $in->getAttribute( 'name' );
@@ -749,12 +770,32 @@ foreach ( $box as $c ) {
 			$out[] = $v . ' resultat-recherche';
 		}
 	}
+	if ( preg_match_all( '/var\\s+vbo_suggestions_[0-9]+\\s*=\\s*(\\{.*?\\});/s', $doc->saveHTML( $c ), $m ) ) {
+		foreach ( $m[1] as $js ) {
+			foreach ( (array) json_decode( $js, true ) as $jour => $chambres ) {
+				foreach ( (array) $chambres as $id => $fiche ) {
+					if ( ctype_digit( (string) $id ) ) {
+						$out[] = $id . ' suggestion';
+					}
+				}
+			}
+		}
+	}
 	foreach ( $xp->query( './/a[@href]', $c ) as $a ) {
-		parse_str( (string) parse_url( $a->getAttribute( 'href' ), PHP_URL_QUERY ), $q );
+		$h = $a->getAttribute( 'href' );
+		parse_str( (string) parse_url( $h, PHP_URL_QUERY ), $q );
 		foreach ( array( 'roomid', 'roomdetail' ) as $k ) {
 			if ( isset( $q[ $k ] ) && is_string( $q[ $k ] ) && ctype_digit( $q[ $k ] ) ) {
 				$out[] = $q[ $k ] . ' lien:' . $k;
 			}
+		}
+		// Lien vers la page d'une chambre : Vik route `view=roomdetails&roomid=n`
+		// vers la page de son shortcode (promotions, constat-vues-vik-par-view.md).
+		$slug = basename( rtrim( (string) parse_url( $h, PHP_URL_PATH ), '/' ) );
+		if ( isset( $q['page_id'] ) && isset( $pages[ 'id:' . $q['page_id'] ] ) ) {
+			$out[] = $pages[ 'id:' . $q['page_id'] ] . ' lien:page_id';
+		} elseif ( '' !== $slug && isset( $pages[ 'slug:' . $slug ] ) ) {
+			$out[] = $pages[ 'slug:' . $slug ] . ' lien:page';
 		}
 	}
 	foreach ( $xp->query( ".//li[contains(concat(' ', normalize-space(@class), ' '), ' room_result ')]", $c ) as $li ) {
@@ -786,11 +827,11 @@ verif2_marque_de() {
   printf '%s' "${hex:--}"
 }
 
-# verif2_classer FICHIER EMPREINTE_MARQUE -> une ligne « ETAT ids_propres ids_etrangers »
+# verif2_classer FICHIER EMPREINTE_MARQUE [1 si AJAX] -> une ligne « ETAT ids_propres ids_etrangers »
 # ETAT ∈ { SANS_CONTENEUR, AUCUN, PROPRE, ETRANGER, NON_RAPPORTE }
 verif2_classer() {
-  local fichier="$1" attendu="$2" brut n_conteneurs ligne id propres="" etrangers="" non_rapporte=0
-  brut=$(php -- "$fichier" "$VERIF2_PAGES_FICHIER" <<< "$VERIF2_EXTRACTEUR")
+  local fichier="$1" attendu="$2" ajax="${3:-0}" brut n_conteneurs ligne id propres="" etrangers="" non_rapporte=0
+  brut=$(php -- "$fichier" "$VERIF2_PAGES_FICHIER" "$ajax" <<< "$VERIF2_EXTRACTEUR")
   n_conteneurs=$(printf '%s\n' "$brut" | sed -n 's/^CONTENEURS //p')
   if [ "${n_conteneurs:-0}" -eq 0 ]; then
     echo "SANS_CONTENEUR - -"; return
@@ -814,20 +855,27 @@ verif2_classer() {
 }
 
 # verif2_lire FICHIER URL [champ=valeur ...] : GET sans champ, POST sinon.
+# Imprime le code HTTP final. -g : `roomid[]` et `party[0][adults]` sont des
+# noms de paramètre, pas des motifs de curl. VERIF2_SUIVRE=0 : ne suit pas
+# les redirections (AJAX : un 3xx y veut dire qu'aucune vue n'est rendue, et
+# sa cible, l'administration, n'est pas la vue mesurée).
+VERIF2_SUIVRE=1
 verif2_lire() {
   local fichier="$1" url="$2"; shift 2
-  if [ $# -eq 0 ]; then
-    curl -s -L --max-time 30 -o "$fichier" "$url"
+  if [ $# -eq 0 ] && [ "$VERIF2_SUIVRE" -eq 0 ]; then
+    curl -g -s --max-time 30 -o "$fichier" -w '%{http_code}' "$url"
+  elif [ $# -eq 0 ]; then
+    curl -g -s -L --max-time 30 -o "$fichier" -w '%{http_code}' "$url"
   else
     local -a args=(); local champ
     for champ in "$@"; do args+=(--data-urlencode "$champ"); done
-    curl -s -L --max-time 30 -X POST "${args[@]}" -o "$fichier" "$url"
+    curl -g -s -L --max-time 30 -X POST "${args[@]}" -o "$fichier" -w '%{http_code}' "$url"
   fi
 }
 
 verif2_vues_publiques() {
   local marque="$1" page_propre="$2" room_propre="$3" room_etranger="$4"
-  titre "Vérification 2 — quatre vues publiques ($marque), chambre étrangère #$room_etranger"
+  titre "Vérification 2 — vues de Vik joignables par view ($marque), chambre étrangère #$room_etranger"
 
   if ! verif2_charger_references; then
     rouge "  KO   correspondances du registre ou des pages Vik illisibles : mesure impossible"
@@ -847,7 +895,7 @@ verif2_vues_publiques() {
 
   # Témoin : la page sans paramètre propose sa chambre, et elle seule.
   local temoin etat propres etrangers
-  verif2_lire "$fichier" "${page}?_r=t-$$"
+  verif2_lire "$fichier" "${page}?_r=t-$$" >/dev/null
   temoin=$(verif2_classer "$fichier" "$attendu")
   read -r etat propres etrangers <<< "$temoin"
   if [ "$etat" != "PROPRE" ] || [ "$propres" != "$room_propre" ]; then
@@ -857,9 +905,14 @@ verif2_vues_publiques() {
   fi
   vert "  OK   témoin : page propre, chambre #$room_propre et elle seule"
 
-  local ci co
+  local ci co ci_ts co_ts
   ci=$(iso_vers_ddmmyyyy "$(date_dans_jours "$VERIF2_JOURS_RECHERCHE")")
   co=$(iso_vers_ddmmyyyy "$(date_dans_jours $((VERIF2_JOURS_RECHERCHE + 1)))")
+  # Horodatages de minuit, heure de Zurich : ce que searchsuggestions et
+  # loginregister reçoivent de Vik lui-même.
+  ci_ts=$(php -r 'date_default_timezone_set("Europe/Zurich"); echo mktime(0, 0, 0, (int) date("n"), (int) date("j") + (int) $argv[1], (int) date("Y"));' "$VERIF2_JOURS_RECHERCHE")
+  co_ts=$((ci_ts + 86400))
+  local ajax="https://$HOTE/wp-admin/admin-ajax.php?action=vikbooking&vik_ajax_client=site&option=com_vikbooking&"
 
   local -a vues=(
     "roomdetails, roomid étranger|view=roomdetails&roomid=$room_etranger|"
@@ -868,22 +921,38 @@ verif2_vues_publiques() {
     "roomslist, category_id=$room_etranger|view=roomslist&category_id=$room_etranger|"
     "roomslist, sans sélection|view=roomslist|"
     "search, roomdetail étranger||option=com_vikbooking task=search checkindate=$ci checkinh=15 checkinm=0 checkoutdate=$co checkouth=11 checkoutm=0 roomsnum=1 adults[]=2 roomdetail=$room_etranger"
+    "availability, room_ids[]=${room_etranger}abc|view=availability&room_ids[]=$room_propre&room_ids[]=${room_etranger}abc|"
+    "loginregister, roomid[] étranger|view=loginregister&roomsnum=1&roomid[]=$room_etranger&days=1&checkin=$ci_ts&checkout=$co_ts&adults[]=2|"
+    "promotions|view=promotions|"
+    "searchsuggestions, sans catégorie|view=searchsuggestions&code=1&fromts=$ci_ts&tots=$co_ts&party[0][adults]=2|"
+    "AJAX roomdetails, roomid étranger|@view=roomdetails&roomid=$room_etranger|"
+    "AJAX availability, sans sélection|@view=availability|"
+    "AJAX roomslist, sans sélection|@view=roomslist|"
+    "AJAX promotions|@view=promotions|"
+    "AJAX searchsuggestions, getjson|@view=searchsuggestions&getjson=1&tmpl=component&code=1&fromts=$ci_ts&tots=$co_ts&party[0][adults]=2|"
   )
-  local entry libelle requete champs url all_ok=1 inconstant=0 non_mesure=0 premiere seconde
+  local entry libelle requete champs url all_ok=1 inconstant=0 non_mesure=0 premiere seconde est_ajax code1 code2
   for entry in "${vues[@]}"; do
     libelle="${entry%%|*}"; requete="${entry#*|}"; champs="${requete#*|}"; requete="${requete%%|*}"
-    url="${page}?${requete:+$requete&}_r="
+    est_ajax=0
+    if [ "${requete#@}" != "$requete" ]; then
+      est_ajax=1; requete="${requete#@}"
+      url="${ajax}${requete}&_r="
+    else
+      url="${page}?${requete:+$requete&}_r="
+    fi
 
     # Deux lectures, jamais une seule : règle absolue n°4 de CLAUDE.md. Deux
     # résultats différents à quelques secondes d'écart pointent vers un cache,
     # pas vers ce greffon, et ne se rapportent pas comme un défaut.
     local -a champs_post=()
     [ -n "$champs" ] && read -r -a champs_post <<< "$champs"
-    verif2_lire "$fichier" "${url}1-$$" ${champs_post[@]+"${champs_post[@]}"}; premiere=$(verif2_classer "$fichier" "$attendu")
+    VERIF2_SUIVRE=$((1 - est_ajax))
+    code1=$(verif2_lire "$fichier" "${url}1-$$" ${champs_post[@]+"${champs_post[@]}"}); premiere="$(verif2_classer "$fichier" "$attendu" "$est_ajax") $code1"
     sleep 2
-    verif2_lire "$fichier" "${url}2-$$" ${champs_post[@]+"${champs_post[@]}"}; seconde=$(verif2_classer "$fichier" "$attendu")
+    code2=$(verif2_lire "$fichier" "${url}2-$$" ${champs_post[@]+"${champs_post[@]}"}); seconde="$(verif2_classer "$fichier" "$attendu" "$est_ajax") $code2"
 
-    read -r etat propres etrangers <<< "$premiere"
+    read -r etat propres etrangers _ <<< "$premiere"
     if [ "$premiere" != "$seconde" ]; then
       jaune "  ??   $libelle : deux lectures discordantes ($premiere / $seconde)"
       jaune "       purger NitroPack puis le cache dynamique SiteGround et rejouer (règle absolue n°4)"
@@ -891,6 +960,12 @@ verif2_vues_publiques() {
     elif [ "$etat" = "ETRANGER" ]; then
       rouge "  KO   $libelle : chambre(s) étrangère(s) #${etrangers//,/, #} proposée(s) par Vik (propres : $propres)"
       all_ok=0
+    elif [ "$est_ajax" -eq 1 ] && [ "$code1" = "403" ]; then
+      vert "  OK   $libelle : refusée en 403"
+    elif [ "$est_ajax" -eq 1 ] && [ "${code1#3}" != "$code1" ]; then
+      vert "  OK   $libelle : redirection $code1, aucune vue rendue"
+    elif [ "$est_ajax" -eq 1 ] && [ "$etat" = "AUCUN" ]; then
+      vert "  OK   $libelle : aucune chambre proposée (HTTP $code1)"
     elif [ "$etat" = "PROPRE" ]; then
       vert "  OK   $libelle : Vik ne propose que #${propres//,/, #}"
     elif [ "$etat" = "AUCUN" ] && [ -z "$champs" ]; then
@@ -903,6 +978,7 @@ verif2_vues_publiques() {
       non_mesure=1
     fi
   done
+  VERIF2_SUIVRE=1
 
   if [ "$all_ok" -eq 0 ]; then
     noter "2  KO  au moins une vue publique ($marque) propose la chambre étrangère #$room_etranger, de façon reproductible"
@@ -911,7 +987,7 @@ verif2_vues_publiques() {
   elif [ "$non_mesure" -eq 1 ]; then
     noter "2  ??  ($marque) aucune fuite vue, mais au moins une vue non mesurée"
   else
-    noter "2  OK  quatre vues publiques ($marque) : Vik ne propose aucune chambre étrangère"
+    noter "2  OK  vues de Vik joignables par view, pages et AJAX ($marque) : Vik ne propose aucune chambre étrangère"
   fi
 }
 

@@ -242,6 +242,13 @@ B9g et ne viennent pas de cette tâche.
 
 ## 5. Ce que ce correctif ne fait pas
 
+**Suite du 26 septembre 2026 : `constat-vues-vik-par-view.md`.** Les autres vues ont été
+recensées et mesurées. Trois points de ce chapitre et du chapitre 2 en sortent corrigés :
+l'AJAX du site rendait aussi `roomdetails`, `availability` et `roomslist` avec les chambres
+de l'autre marque ; `room_ids[]=4&room_ids[]=2abc` passait le filtrage (Vik lit `2abc`
+comme 2) ; le crochet `vikbooking_before_display_<vue>` cité plus bas existe, et
+`constat-phase-0.md` Q4 est corrigée en conséquence.
+
 - **Il n'est toujours pas opposable.** C'est une couche de présentation ; la garantie
   reste `booking-guard.php`, dont la vérification 3a confirme le `403` dans les deux sens.
 - **Il ne corrige pas le défaut natif d'une page.** Une page dont le shortcode viserait

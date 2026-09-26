@@ -3,15 +3,18 @@
  * lme-brands — filtrage des chambres par marque, couche de présentation.
  * Chapitre 4.3 du brief, phase 2.
  *
- * Deux mécanismes, parce que Vik n'expose qu'un seul vrai point d'accroche
- * de présentation (constat-phase-0.md Q4) :
+ * Deux mécanismes, parce que Vik n'expose qu'un seul filtre de présentation
+ * (constat-phase-0.md Q4) :
  *
  *   - vue `search` : le filtre natif `vikbooking_apply_search_results_filtering`
  *     retire une annonce des résultats quand le rappel retourne exactement
- *     `false`. C'est le seul écran couvert par un hook.
+ *     `false`. C'est le seul écran couvert par un filtre.
  *
- *   - vues `roomdetails`, `availability`, `roomslist` : aucun hook n'existe
- *     (vérifié dans le code, Q4). Leur filtrage tient à un attribut de
+ *   - les autres vues : Vik déclenche bien `vikbooking_before_display_<vue>`
+ *     avant chacune (`libraries/adapter/mvc/controller.php:263`, Vik
+ *     1.8.15 ; constat-phase-0.md Q4, corrigé), mais avant que la vue ne
+ *     construise sa liste de chambres : il ne permet pas de la filtrer.
+ *     Leur filtrage tient à un attribut de
  *     shortcode (`roomid`, `room_ids`, `category_id`), et cet attribut est
  *     un défaut au sens de `JInput::def()` : il cède devant un paramètre
  *     GET ou POST de même nom, démontré en production dans
@@ -80,7 +83,7 @@ function lme_brands_filter_search_results( $value, $room, $result_filters ) {
 	return false;
 }
 
-// --- Couche 1b : vues sans hook natif ---------------------------------------
+// --- Couche 1b : vues sans filtre natif -------------------------------------
 //
 // Placé sur `init`, priorité 1. Vik ne rend pas sa vue pendant
 // `the_content` : sur une page portant son shortcode, sa propre clôture
@@ -93,11 +96,15 @@ function lme_brands_filter_search_results( $value, $room, $result_filters ) {
 // `template_redirect` retirait bien le paramètre, mais une fois la vue déjà
 // rendue. Priorité 1, avant ce `def()` : le paramètre étranger retiré, c'est
 // le défaut du shortcode, la chambre de la page, que Vik injecte.
+//
+// La même clôture sert l'AJAX du site (`admin-ajax.php`, `vik_ajax_client=site`),
+// sans shortcode donc sans défaut : ce chemin est filtré aussi, et une vue
+// fermée y est refusée en 403 (constat-vues-vik-par-view.md).
 
 add_action( 'init', 'lme_brands_enforce_shortcode_room_scope', 1 );
 
 function lme_brands_enforce_shortcode_room_scope() {
-	if ( is_admin() ) {
+	if ( is_admin() && ! lme_brands_is_vik_site_ajax_request() ) {
 		return;
 	}
 
@@ -108,28 +115,60 @@ function lme_brands_enforce_shortcode_room_scope() {
 		return;
 	}
 
-	lme_brands_strip_foreign_single_room( 'roomid', $expected_brand );      // roomdetails
+	lme_brands_strip_foreign_single_room( 'roomid', $expected_brand );      // roomdetails, searchdetails
 	lme_brands_strip_foreign_room_list( 'room_ids', $expected_brand );      // availability
 	lme_brands_strip_foreign_category( 'category_id', $expected_brand );   // roomslist
-	lme_brands_strip_foreign_listing_view( $expected_brand );               // availability, roomslist
+	lme_brands_strip_foreign_listing_view( $expected_brand );               // vues de liste, lme_brands_view_room_selection()
 }
 
 /**
- * Vues de liste demandées par la requête : `?view=availability` ou
- * `?view=roomslist` ajouté à l'URL de n'importe quelle page Vik remplace la
- * vue de la page (le `def()` de Vik cède devant la requête, comme pour
- * `roomid`). Sans sélection, ces deux vues listent toutes les chambres
- * actives, les deux marques confondues (`site/views/availability/view.html.php:37`,
- * `site/views/roomslist/view.html.php:55`), et aucune n'a de crochet de
- * filtrage. Retirer `room_ids` ou `category_id` ne suffit donc pas : c'est
- * précisément ce qui fait lister toutes les chambres.
+ * Requête AJAX adressée au client *site* de Vik. `handle_vikbooking_ajax()`
+ * restitue la réserve de `VikBookingBody` (`vikbooking.php:205-211`), que la
+ * clôture `init` de Vik remplit dès que `option=com_vikbooking` est présent
+ * (`vikbooking.php:195-198`). Avec `vik_ajax_client=site`, l'application est
+ * celle du site (`libraries/adapter/application/application.php:101-110`) :
+ * `admin-ajax.php?action=vikbooking&vik_ajax_client=site&option=com_vikbooking&view=…`
+ * rend n'importe quelle vue du site, sans défaut de shortcode. Mesuré le
+ * 26 septembre 2026 sur staging13 : `roomdetails`, `availability`,
+ * `roomslist`, `promotions` et `searchsuggestions` y servaient les chambres
+ * de l'autre marque, dans les deux sens, alors que `is_admin()` écartait ce
+ * chemin du filtrage (constat-vues-vik-par-view.md). Sans ce paramètre, le
+ * client est l'administration, dont les vues exigent une session.
+ *
+ * @return bool
+ */
+function lme_brands_is_vik_site_ajax_request() {
+	return wp_doing_ajax()
+		&& isset( $_REQUEST['vik_ajax_client'] )
+		&& 'site' === lme_brands_normalize_vik_cmd( $_REQUEST['vik_ajax_client'] );
+}
+
+/**
+ * Vues de liste demandées par la requête. Un `view` ajouté à l'URL de
+ * n'importe quelle page Vik remplace la vue de la page (le `def()` de Vik
+ * cède devant la requête, comme pour `roomid`). Les vues que
+ * lme_brands_view_room_selection() connaît listent des chambres selon la
+ * seule requête, sans crochet de filtrage, et sans sélection toutes les
+ * chambres actives des deux marques : `availability` et `roomslist`
+ * (constat-correctif-room-filter.md), `loginregister`, `promotions` et
+ * `searchsuggestions` (constat-vues-vik-par-view.md). Retirer `room_ids` ou
+ * `category_id` ne suffit donc pas : c'est précisément ce qui fait lister
+ * toutes les chambres.
  *
  * La vue demandée n'est gardée que si la sélection restante, après les
  * retraits ci-dessus, désigne au moins une chambre et uniquement des
- * chambres de la marque de l'hôte. Sinon le paramètre `view` est retiré, et
- * la page retombe sur sa propre vue, celle de son shortcode. Constat du
- * 24 septembre 2026 : aucune page publiée ne porte nativement l'une de ces
- * deux vues (constat-correctif-room-filter.md).
+ * chambres de la marque de l'hôte. Sinon :
+ *
+ *   - sur une page, le paramètre `view` est retiré, et la page retombe sur
+ *     sa propre vue, celle de son shortcode. Aucune page publiée ne porte
+ *     nativement l'une de ces vues (relevé de sir_vikbooking_wpshortcodes,
+ *     24 et 26 septembre 2026) ;
+ *   - en AJAX du site, il n'y a pas de vue de repli : la requête est refusée
+ *     en 403. C'est ce que reçoit aussi l'appel légitime de
+ *     `searchsuggestions` par le formulaire « aucun résultat »
+ *     (`site/helpers/error_form.php:799`) quand la recherche ne porte pas de
+ *     catégorie propre à la marque : il n'affiche alors aucune suggestion,
+ *     au lieu de suggérer les chambres de l'autre marque.
  *
  * @param string $expected_brand
  */
@@ -138,57 +177,72 @@ function lme_brands_strip_foreign_listing_view( $expected_brand ) {
 		return;
 	}
 
-	// Normalisé comme le filtre `cmd` de Vik (`libraries/adapter/input/filter.php:191`,
-	// caractères hors de A-Z, 0-9, `_`, `.`, `-` retirés, points de tête ôtés),
-	// puis en minuscules : `view=availability%20` rend bien la vue availability,
-	// constaté le 24 septembre 2026. Comparer la valeur brute la laissait passer.
-	$view = strtolower( ltrim( (string) preg_replace( '/[^A-Z0-9_.-]/i', '', $_REQUEST['view'] ), '.' ) );
+	$view = lme_brands_normalize_vik_cmd( $_REQUEST['view'] );
 
-	if ( 'availability' === $view ) {
-		$room_ids = isset( $_REQUEST['room_ids'] ) ? lme_brands_parse_id_list( $_REQUEST['room_ids'] ) : array();
-	} elseif ( 'roomslist' === $view ) {
-		$category_id = isset( $_REQUEST['category_id'] ) && ! is_array( $_REQUEST['category_id'] ) ? (int) $_REQUEST['category_id'] : 0;
-		$room_ids    = $category_id > 0
-			? lme_brands_room_ids_matching_category( lme_brands_room_category_tokens(), $category_id )
-			: array();
-	} else {
+	if ( ! in_array( $view, array( 'availability', 'roomslist', 'loginregister', 'searchsuggestions', 'promotions' ), true ) ) {
 		return;
 	}
 
-	$foreign_room = null;
+	$room_ids = lme_brands_view_room_selection( $view, $_REQUEST, lme_brands_room_idcat_map() );
 
-	foreach ( $room_ids as $room_id ) {
-		$resolved = lme_brands_resolve_room_or_log( $room_id );
-
-		if ( 'ok' !== $resolved['status'] || $resolved['brand_key'] !== $expected_brand ) {
-			$foreign_room = $room_id;
-			break;
-		}
+	if ( null === $room_ids ) {
+		return;
 	}
+
+	$foreign_room = lme_brands_first_foreign_room( $room_ids, 'lme_brands_resolve_room_or_log', $expected_brand );
 
 	if ( array() !== $room_ids && null === $foreign_room ) {
 		return;
 	}
 
+	$ajax   = lme_brands_is_vik_site_ajax_request();
+	$reason = null === $foreign_room
+		? 'sans sélection, la vue listerait les chambres de toutes les marques'
+		: sprintf( "la sélection contient la chambre #%d, hors de la marque de l'hôte courant (%s)", $foreign_room, $expected_brand );
+
 	lme_brands_log(
 		'warning',
-		'foreign_view_param_stripped',
-		sprintf(
-			"Paramètre 'view=%s' retiré de la requête : %s. La page retombe sur la vue de son shortcode.",
-			$view,
-			null === $foreign_room
-				? 'sans sélection, la vue listerait les chambres de toutes les marques'
-				: sprintf( "la sélection contient la chambre #%d, hors de la marque de l'hôte courant (%s)", $foreign_room, $expected_brand )
-		),
+		$ajax ? 'foreign_view_ajax_refused' : 'foreign_view_param_stripped',
+		$ajax
+			? sprintf( "Requête AJAX 'view=%s' refusée en 403 : %s.", $view, $reason )
+			: sprintf( "Paramètre 'view=%s' retiré de la requête : %s. La page retombe sur la vue de son shortcode.", $view, $reason ),
 		array(
 			'view'           => $view,
 			'room_ids'       => $room_ids,
 			'foreign_room'   => $foreign_room,
 			'expected_brand' => $expected_brand,
+			'ajax'           => $ajax,
 		)
 	);
 
+	if ( $ajax ) {
+		lme_brands_refuse_foreign_view_ajax( $expected_brand );
+	}
+
 	lme_brands_strip_request_param( 'view' );
+}
+
+/**
+ * Refus en 403 d'une vue AJAX fermée. Ne rend jamais la main : `wp_die()`.
+ * Message dans la première langue de la marque de l'hôte, par le registre,
+ * pour la raison exposée dans includes/booking-guard.php
+ * (lme_brands_reject_booking_attempt()) : aucun domaine de traduction n'est
+ * chargé pour ce mu-plugin.
+ *
+ * @param string $expected_brand
+ */
+function lme_brands_refuse_foreign_view_ajax( $expected_brand ) {
+	$config    = lme_brands_get_config();
+	$languages = isset( $config['brands'][ $expected_brand ]['languages'] ) ? (array) $config['brands'][ $expected_brand ]['languages'] : array();
+	$message   = lme_brands_pick_localized(
+		array(
+			'fr' => "Cette page n'est pas disponible depuis cette adresse.",
+			'en' => 'This page is not available from this address.',
+		),
+		array_merge( $languages, array( 'fr' ) )
+	);
+
+	wp_die( esc_html( $message ), '', array( 'response' => 403 ) );
 }
 
 /**
@@ -236,7 +290,8 @@ function lme_brands_strip_foreign_single_room( $param, $expected_brand ) {
 
 /**
  * availability : liste d'identifiants, `room_ids`, en tableau
- * (`room_ids[]=...`) ou en chaîne délimitée. Un seul identifiant étranger
+ * (`room_ids[]=...`) ; une chaîne ne vaut que son premier nombre, comme
+ * chez Vik. Un seul identifiant étranger
  * dans la liste fait retirer la liste entière plutôt que la réduire en
  * silence — chapitre 6 du brief, aucun échec silencieux.
  *
@@ -248,7 +303,9 @@ function lme_brands_strip_foreign_room_list( $param, $expected_brand ) {
 		return;
 	}
 
-	$room_ids = lme_brands_parse_id_list( $_REQUEST[ $param ] );
+	// Lu comme Vik le lit, filtre `int` et zéros retirés
+	// (`site/views/availability/view.html.php:18`) : `2abc` vaut 2.
+	$room_ids = array_values( array_filter( (array) lme_brands_vik_filter_int( $_REQUEST[ $param ] ) ) );
 
 	foreach ( $room_ids as $room_id ) {
 		$resolved = lme_brands_resolve_room_or_log( $room_id );
@@ -302,8 +359,9 @@ function lme_brands_strip_foreign_category( $param, $expected_brand ) {
 		return;
 	}
 
-	$category_id       = (int) $_REQUEST[ $param ];
-	$room_ids_in_this  = lme_brands_room_ids_matching_category( lme_brands_room_category_tokens(), $category_id );
+	// Filtre `int` de Vik (`site/views/roomslist/view.html.php:20`) : `x2` vaut 2.
+	$category_id       = lme_brands_vik_filter_int( $_REQUEST[ $param ] );
+	$room_ids_in_this  = lme_brands_room_ids_matching_category( lme_brands_room_category_tokens_from_idcat( lme_brands_room_idcat_map() ), $category_id );
 
 	foreach ( $room_ids_in_this as $room_id ) {
 		$resolved = lme_brands_resolve_room_or_log( $room_id );
@@ -360,17 +418,19 @@ function lme_brands_strip_request_param( $name ) {
 }
 
 /**
- * Chambres Vik dont `sir_vikbooking_rooms.idcat` contient chaque jeton de
- * catégorie, sous la forme `room_id => jetons[]`. Même format que le
- * filtrage natif de la vue `search` (constat-phase-0.md Q4 : `idcat` est une
- * chaîne de jetons séparés par `;`, dénormalisée, sans table de liaison).
+ * `sir_vikbooking_rooms.idcat` brut de chaque chambre de Vik, disponible ou
+ * non, sous la forme `room_id => idcat` : une chaîne de jetons séparés par
+ * `;`, dénormalisée, sans table de liaison (constat-phase-0.md Q4). Les
+ * décisions en sont tirées par les fonctions pures de core.php.
  *
  * Lecture seule, jamais en cache au-delà de la requête courante : c'est une
- * donnée Vik, pas une donnée du registre lme-brands.
+ * donnée Vik, pas une donnée du registre lme-brands. Table absente : carte
+ * vide, et toute vue qui en dépend retombe sur une sélection vide, donc
+ * fermée.
  *
  * @return array
  */
-function lme_brands_room_category_tokens() {
+function lme_brands_room_idcat_map() {
 	static $map = null;
 
 	if ( null !== $map ) {
@@ -381,17 +441,16 @@ function lme_brands_room_category_tokens() {
 
 	$table  = $wpdb->prefix . 'vikbooking_rooms';
 	$exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) === $table;
+	$map    = array();
 
 	if ( ! $exists ) {
-		$map = array();
 		return $map;
 	}
 
 	$rows = $wpdb->get_results( "SELECT id, idcat FROM {$table}" ); // Nom de table issu de $wpdb->prefix, aucune entrée utilisateur.
-	$map  = array();
 
 	foreach ( $rows as $row ) {
-		$map[ (int) $row->id ] = array_values( array_filter( explode( ';', (string) $row->idcat ) ) );
+		$map[ (int) $row->id ] = (string) $row->idcat;
 	}
 
 	return $map;

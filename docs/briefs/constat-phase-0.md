@@ -289,7 +289,28 @@ Signature : `($valeur, array $room, array $resultFilters)` — `filter()` insèr
 
 C'est le mécanisme prévu pour la couche 1 de la phase 2, sans toucher un fichier de Vik.
 
-**Réserve à porter au brief :** ce filtre ne couvre **que la vue `search`**. Aucun hook n'existe dans `roomslist`, `availability`, `roomdetails` ni `searchsuggestions` — vérifié, `getDispatcher()` n'y apparaît pas. Si l'un de ces écrans est publié sur l'hôte Sexcape Room, il faudra le traiter autrement : shortcode paramétré par marque pour la présentation, et la garde de la couche 2 pour l'étanchéité réelle.
+**Correctif du 26 septembre 2026 (`constat-vues-vik-par-view.md`) : le paragraphe suivant, tel qu'écrit ici le 9 septembre, est faux dans sa deuxième phrase.** Il est gardé tel quel, entre guillemets, pour que l'erreur reste lisible :
+
+> « **Réserve à porter au brief :** ce filtre ne couvre **que la vue `search`**. Aucun hook n'existe dans `roomslist`, `availability`, `roomdetails` ni `searchsuggestions` — vérifié, `getDispatcher()` n'y apparaît pas. Si l'un de ces écrans est publié sur l'hôte Sexcape Room, il faudra le traiter autrement : shortcode paramétré par marque pour la présentation, et la garde de la couche 2 pour l'étanchéité réelle. »
+
+**Ce qui est vrai : un crochet existe avant chaque vue, `vikbooking_before_display_<vue>`.** Il ne se déclenche pas dans les fichiers des vues, où la recherche de `getDispatcher()` l'a cherché, mais dans le contrôleur générique qui les affiche toutes. Relu à la source sur `staging13.linstantcle.ch`, Vik Booking **1.8.15** (`vikbooking.php:6`) :
+
+```
+wp-content/plugins/vikbooking/libraries/adapter/mvc/controller.php:263
+    do_action_ref_array(strtolower($this->prefix) . '_before_display_' . strtolower($action), array(&$view));
+    // display the view before to terminate
+    $view->display();
+wp-content/plugins/vikbooking/libraries/adapter/mvc/controller.php:275
+    do_action(strtolower($this->prefix) . '_after_display_' . strtolower($action), array($view));
+```
+
+Le préfixe est `VikBooking` (`libraries/system/body.php:54`, `JController::getInstance('VikBooking', …)`), `$action` la vue que le contrôleur du site a retenue (`site/controller.php:17-44`). D'où `vikbooking_before_display_roomdetails`, `vikbooking_before_display_availability`, `vikbooking_before_display_roomslist`, `vikbooking_before_display_searchsuggestions`, et de même pour chaque vue, suivis de leurs pendants `vikbooking_after_display_<vue>`. Les deux lignes sont identiques, à la même place, dans la copie 1.8.14 de `.local/vikbooking/` qui a servi à écrire ce paragraphe : l'erreur ne vient pas d'un changement de version, mais d'une recherche limitée aux fichiers des vues.
+
+Ce que le rappel reçoit, relu dans WordPress 7.1.2 de la même préproduction, puisque c'est ce qu'une lecture du seul code de Vik a manqué en Q5 : `do_action_ref_array()` passe les éléments de son tableau tels quels (`wp-includes/plugin.php:543-571`), donc le rappel de `_before_display_` reçoit l'objet vue en premier argument ; `do_action()` déballe un tableau `array($objet)` à un seul élément (`wp-includes/plugin.php:518-521`), donc celui de `_after_display_` reçoit aussi l'objet, jamais un tableau.
+
+Ce que ce crochet ne permet pas : **filtrer une liste de chambres**. Il part avant `$view->display()`, or c'est dans `display()` que chaque vue lit la requête et interroge la base (par exemple `site/views/availability/view.html.php:18` et `:35`). Il n'y a encore rien à filtrer, et le crochet n'a pas de valeur de retour. Le reste de la réserve tient donc : **aucune de ces vues n'a de filtre de résultats**, `vikbooking_apply_search_results_filtering` reste le seul, et le filtrage des autres vues passe par la requête (`mu-plugins/lme-brands/includes/room-filter.php`, accroché sur `init`, priorité 1). Un point d'accroche réel, par vue, existe néanmoins ; il n'est pas utilisé aujourd'hui.
+
+La leçon est celle de Q5 : une recherche ciblée dans quelques fichiers, même exacte pour ces fichiers, ne prouve pas l'absence d'un crochet. Il faut aussi lire le cadre qui les appelle.
 
 ---
 

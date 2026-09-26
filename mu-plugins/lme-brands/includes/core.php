@@ -614,6 +614,213 @@ function lme_brands_room_ids_matching_category( array $room_category_tokens, $ca
 }
 
 /**
+ * Jetons de catégorie de chaque chambre, depuis la valeur brute de
+ * `sir_vikbooking_rooms.idcat` : `room_id => jetons[]`, jetons vides
+ * retirés. Forme attendue par lme_brands_room_ids_matching_category().
+ *
+ * @param array $room_idcat room_id (int) => idcat brut (string).
+ * @return array
+ */
+function lme_brands_room_category_tokens_from_idcat( array $room_idcat ) {
+	$map = array();
+
+	foreach ( $room_idcat as $room_id => $idcat ) {
+		$map[ (int) $room_id ] = array_values( array_filter( explode( ';', (string) $idcat ) ) );
+	}
+
+	return $map;
+}
+
+/**
+ * Nettoyage `cmd` de Vik, suivi d'un passage en minuscules : caractères
+ * hors de A-Z, 0-9, `_`, `.`, `-` retirés, points de tête ôtés
+ * (`libraries/adapter/input/filter.php:191`, Vik 1.8.15). C'est le filtre
+ * par défaut de `JInput::get()`, donc celui que Vik applique à `view` et à
+ * `vik_ajax_client` avant de s'en servir. `view=availability%20` rend bien
+ * la vue availability (constat-correctif-room-filter.md). Les minuscules
+ * évitent de dépendre de la casse du système de fichiers.
+ *
+ * @param mixed $value
+ * @return string Chaîne vide pour une valeur qui n'est pas une chaîne.
+ */
+function lme_brands_normalize_vik_cmd( $value ) {
+	if ( ! is_string( $value ) ) {
+		return '';
+	}
+
+	return strtolower( ltrim( (string) preg_replace( '/[^A-Z0-9_.-]/i', '', $value ), '.' ) );
+}
+
+/**
+ * Filtre `int` de Vik, à l'identique (`libraries/adapter/input/filter.php:63-84`,
+ * Vik 1.8.15) : le premier nombre signé trouvé dans la valeur, 0 s'il n'y
+ * en a pas, élément par élément pour un tableau. `2abc` et `x2` valent 2.
+ * Un élément qui est lui-même un tableau vaut 0, comme chez Vik, qui le
+ * convertit en la chaîne « Array ».
+ *
+ * lme_brands_parse_id_list() écarte au contraire tout élément non entier :
+ * correcte pour un jeton de Vik, elle ne dit pas ce que Vik lira d'un
+ * paramètre de requête. Mesuré le 26 septembre 2026 sur staging13 :
+ * `room_ids[]=4&room_ids[]=2abc` rendait les chambres 2 et 4 sous le levier
+ * Sexcape Room (constat-vues-vik-par-view.md).
+ *
+ * @param mixed $value
+ * @return int|int[]
+ */
+function lme_brands_vik_filter_int( $value ) {
+	if ( is_array( $value ) ) {
+		$result = array();
+
+		foreach ( $value as $each ) {
+			$result[] = is_array( $each ) ? 0 : lme_brands_vik_filter_int( $each );
+		}
+
+		return $result;
+	}
+
+	if ( is_object( $value ) ) {
+		return 0;
+	}
+
+	return preg_match( '/[-+]?[0-9]+/', (string) $value, $matches ) ? (int) $matches[0] : 0;
+}
+
+/**
+ * Chambres qu'afficherait une vue de Vik joignable par le paramètre `view`
+ * et qui liste des chambres selon la requête seule. Relu dans Vik 1.8.15,
+ * sur staging13, le 26 septembre 2026 (constat-vues-vik-par-view.md) ; la
+ * lecture de chaque vue est reproduite, pas approchée :
+ *
+ *   - `availability` : `room_ids`, filtre `int`, zéros retirés
+ *     (`site/views/availability/view.html.php:18`) ;
+ *   - `roomslist` : `category_id`, filtre `int`, puis les chambres de cette
+ *     catégorie (`site/views/roomslist/view.html.php:20`) ;
+ *   - `loginregister` : `roomid[indice]` pour chaque indice inférieur à
+ *     `roomsnum`, non vide, puis `intval()`
+ *     (`site/views/loginregister/view.html.php:18-35`) ;
+ *   - `searchsuggestions` : toutes les chambres, sauf celles qui ont une
+ *     catégorie et pas celle de `categories`
+ *     (`site/views/searchsuggestions/view.html.php:68-88`) ;
+ *   - `promotions` : les chambres des promotions en cours, que la requête
+ *     ne restreint pas (`site/views/promotions/view.html.php:27-148`).
+ *
+ * Une liste vide veut dire : la requête ne restreint pas la vue, qui
+ * listerait donc les chambres de toutes les marques. L'appelant ferme la
+ * vue. Toute forme que Vik lirait autrement qu'ici (tableau à la place d'un
+ * scalaire, catégorie non numérique) donne aussi une liste vide : dans le
+ * doute, on ferme.
+ *
+ * Toutes les chambres de la carte `$room_idcat` sont comptées, disponibles
+ * ou non : Vik ne garde que `avail = 1`, la liste rendue ici en est donc un
+ * sur-ensemble. Elle peut faire fermer une vue que Vik aurait rendue propre,
+ * jamais en laisser passer une qui ne l'est pas.
+ *
+ * @param string $view       Vue normalisée (lme_brands_normalize_vik_cmd()).
+ * @param array  $request    Paramètres de la requête ($_REQUEST).
+ * @param array  $room_idcat room_id (int) => idcat brut, toutes les chambres de Vik.
+ * @return int[]|null null si la vue n'est pas l'une de celles-ci.
+ */
+function lme_brands_view_room_selection( $view, array $request, array $room_idcat ) {
+	switch ( $view ) {
+		case 'availability':
+			if ( ! isset( $request['room_ids'] ) ) {
+				return array();
+			}
+
+			return array_values( array_filter( (array) lme_brands_vik_filter_int( $request['room_ids'] ) ) );
+
+		case 'roomslist':
+			if ( ! isset( $request['category_id'] ) || is_array( $request['category_id'] ) ) {
+				return array();
+			}
+
+			$category_id = lme_brands_vik_filter_int( $request['category_id'] );
+
+			return $category_id > 0
+				? lme_brands_room_ids_matching_category( lme_brands_room_category_tokens_from_idcat( $room_idcat ), $category_id )
+				: array();
+
+		case 'loginregister':
+			$rooms_num = isset( $request['roomsnum'] ) && ! is_array( $request['roomsnum'] ) ? lme_brands_vik_filter_int( $request['roomsnum'] ) : 0;
+			$room_ids  = array();
+
+			if ( ! isset( $request['roomid'] ) || $rooms_num < 1 ) {
+				return array();
+			}
+
+			if ( is_array( $request['roomid'] ) ) {
+				foreach ( $request['roomid'] as $index => $value ) {
+					if ( is_int( $index ) && $index >= 0 && $index < $rooms_num && ! empty( $value ) ) {
+						$room_ids[] = intval( $value );
+					}
+				}
+			} else {
+				// Chaîne : Vik lit `$proomid[$ind]`, un caractère par indice.
+				$chars = str_split( (string) $request['roomid'] );
+
+				foreach ( array_slice( $chars, 0, $rooms_num ) as $char ) {
+					if ( ! empty( $char ) ) {
+						$room_ids[] = intval( $char );
+					}
+				}
+			}
+
+			return array_values( array_unique( array_filter( $room_ids ) ) );
+
+		case 'searchsuggestions':
+			$category = isset( $request['categories'] ) ? $request['categories'] : '';
+
+			// Seule une catégorie numérique ressort intacte du filtre `string`
+			// de Vik ; toute autre forme est lue par Vik autrement qu'ici.
+			if ( ! is_string( $category ) || ! ctype_digit( $category ) || empty( $category ) ) {
+				return array();
+			}
+
+			$room_ids = array();
+
+			foreach ( $room_idcat as $room_id => $idcat ) {
+				$room_cats = explode( ';', (string) $idcat );
+
+				if ( ! empty( $idcat ) && ! empty( $room_cats[0] ) && ! in_array( $category, $room_cats ) ) {
+					continue;
+				}
+
+				$room_ids[] = (int) $room_id;
+			}
+
+			return $room_ids;
+
+		case 'promotions':
+			return array();
+	}
+
+	return null;
+}
+
+/**
+ * Première chambre de la liste qui n'est pas, avec certitude, de la marque
+ * attendue : chambre d'une autre marque, ou chambre que le registre ne
+ * résout pas. null si toutes sont de la marque. Une liste vide donne null :
+ * c'est à l'appelant de décider ce que vaut une sélection vide.
+ *
+ * @param int[]    $room_ids
+ * @param callable $resolve        room_id => résultat de lme_brands_resolve_room().
+ * @param string   $expected_brand
+ * @return int|null
+ */
+function lme_brands_first_foreign_room( array $room_ids, $resolve, $expected_brand ) {
+	foreach ( $room_ids as $room_id ) {
+		$resolved = call_user_func( $resolve, $room_id );
+
+		if ( ! is_array( $resolved ) || ! isset( $resolved['status'] ) || 'ok' !== $resolved['status'] || $resolved['brand_key'] !== $expected_brand ) {
+			return (int) $room_id;
+		}
+	}
+
+	return null;
+}
+
+/**
  * Limitation de débit pure : décide si une alerte doit partir pour ce code,
  * étant donné un état (map code => dernier horodatage d'alerte) et
  * l'horodatage courant. Ne touche à aucun stockage : includes/logger.php
