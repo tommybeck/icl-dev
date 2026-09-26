@@ -22,7 +22,17 @@
 #                           réservations d'essai jusqu'à Stripe Checkout) et,
 #                           après --reprise, la vérification 7. Sans cette
 #                           option : seules les vérifications 1, 2, 3, 4 et 8
-#                           tournent — aucune ne crée quoi que ce soit.
+#                           tournent. Les vérifications 1, 2, 4 et 8 ne créent
+#                           rien ; la vérification 3 soumet de vraies
+#                           réservations à Vik et en crée une si la garde de
+#                           lme-brands la laisse passer.
+#   --verification N        ne mène que la vérification N, dans les deux passes
+#                           quand elle en a ; répétable, ou liste séparée par
+#                           des virgules (--verification 2,3). Valeurs : 1, 2,
+#                           3, 4, 8, et 5 ou 6 avec --appliquer (les deux vont
+#                           ensemble). Sans cette option : toutes celles que
+#                           le mode permet. Incompatible avec --reprise et
+#                           --nettoyer.
 #   --reprise IDORDER       reprend une réservation d'essai payée en mode test
 #                           (voir chapitre 4 du brief) : relit sa page de
 #                           confirmation et son statut (vérification 6c), les
@@ -64,6 +74,7 @@ SSH_ALIAS="sg-linstantcle"
 APPLIQUER=0
 NETTOYER=0
 REPRISE_IDORDER=""
+VERIFICATIONS=""
 
 # Identité des réservations d'essai : reconnaissable au premier coup d'œil
 # dans l'administration de Vik, jamais confondue avec un vrai client
@@ -104,7 +115,7 @@ mourir(){ rouge "ERREUR : $*"; exit 1; }
 # Remplacé plus bas par restore_override_on_exit, qui imprime la même ligne.
 trap 'rc_sortie=$?; printf "\nSORTIE=%s\n" "$rc_sortie"; exit "$rc_sortie"' EXIT
 
-usage() { sed -n '2,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,66p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 JOURNAL=""
 declare -a ARGS_SANS_JOURNAL=()
@@ -116,6 +127,7 @@ while [ $# -gt 0 ]; do
     --appliquer)       APPLIQUER=1; ARGS_SANS_JOURNAL+=("$1"); shift ;;
     --reprise)         REPRISE_IDORDER="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
     --nettoyer)        NETTOYER=1; ARGS_SANS_JOURNAL+=("$1"); shift ;;
+    --verification)    VERIFICATIONS="${VERIFICATIONS:+$VERIFICATIONS,}${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
     --journal)         JOURNAL="${2:-}"; shift 2 ;;
     -h|--help)         usage; exit 0 ;;
     *) mourir "option inconnue : $1 (--help pour l'usage)" ;;
@@ -136,6 +148,33 @@ if [ -n "$REPRISE_IDORDER" ]; then
     ''|*[!0-9]*) mourir "--reprise attend un identifiant de réservation numérique, reçu '$REPRISE_IDORDER'" ;;
   esac
 fi
+
+# Vérifications choisies : « 2 3 » entre espaces, ou vide pour toutes. Une
+# valeur inconnue ou hors de son mode refuse, jamais ignorée en silence.
+VERIFS_CHOISIES=""
+if [ -n "$VERIFICATIONS" ]; then
+  [ -z "$REPRISE_IDORDER" ] && [ "$NETTOYER" -eq 0 ] \
+    || mourir "--verification ne se combine ni avec --reprise ni avec --nettoyer"
+  for v in $(printf '%s' "$VERIFICATIONS" | tr ',' ' '); do
+    case "$v" in
+      1|2|3|4|8) ;;
+      5|6) [ "$APPLIQUER" -eq 1 ] || mourir "--verification $v exige --appliquer : elle crée une réservation d'essai jusqu'à Stripe Checkout"
+           v=5 ;;
+      7)   mourir "--verification 7 ne se mène qu'après --reprise IDORDER" ;;
+      *)   mourir "--verification attend 1, 2, 3, 4, 5, 6 ou 8, reçu '$v'" ;;
+    esac
+    case " $VERIFS_CHOISIES " in *" $v "*) ;; *) VERIFS_CHOISIES="$VERIFS_CHOISIES $v" ;; esac
+  done
+  [ -n "$VERIFS_CHOISIES" ] || mourir "--verification attend au moins une valeur"
+  VERIFS_CHOISIES="$VERIFS_CHOISIES "
+fi
+
+# verif_choisie N : vrai si N est à mener. 5 et 6 vont ensemble, sous 5.
+verif_choisie() {
+  [ -z "$VERIFS_CHOISIES" ] && return 0
+  case "$VERIFS_CHOISIES" in *" $1 "*) return 0 ;; esac
+  return 1
+}
 
 command -v ssh >/dev/null || mourir "ssh introuvable"
 command -v curl >/dev/null || mourir "curl introuvable"
@@ -1075,9 +1114,18 @@ if [ -n "$REPRISE_IDORDER" ]; then
   exit $?
 fi
 
-capture_override_original
+[ -n "$VERIFS_CHOISIES" ] && info "vérifications choisies :$VERIFS_CHOISIES"
 
-for PASSE in sexcaperoom linstantcle; do
+# Aucune vérification par passe choisie (--verification 8 seule) : le levier
+# n'est ni lu ni posé.
+PASSES="sexcaperoom linstantcle"
+if ! verif_choisie 1 && ! verif_choisie 2 && ! verif_choisie 3 && ! verif_choisie 4 && ! verif_choisie 5; then
+  PASSES=""
+else
+  capture_override_original
+fi
+
+for PASSE in $PASSES; do
   if [ "$PASSE" = "sexcaperoom" ]; then
     OVERRIDE_HOST="$OVERRIDE_HOST_SEXCAPEROOM"
     ROOM_ACTIVE="$ROOM_SEXCAPEROOM_ACTIVE"
@@ -1097,12 +1145,14 @@ for PASSE in sexcaperoom linstantcle; do
   titre "PASSE — $PASSE (levier = $OVERRIDE_HOST)"
   set_override "$OVERRIDE_HOST"
 
-  verif1_resolution_marque "$PASSE"
-  verif2_vues_publiques "$PASSE" "$PAGE_PROPRE" "$ROOM_ACTIVE" "$ROOM_ETRANGER"
-  verif3_garde_reservation "$PASSE" "$ROOM_ETRANGER" "$NOM_ETRANGER" "$ROOM_DESACTIVEE"
-  verif4_apparence "$PASSE" "$ATTENDU_SRLM"
+  verif_choisie 1 && verif1_resolution_marque "$PASSE"
+  verif_choisie 2 && verif2_vues_publiques "$PASSE" "$PAGE_PROPRE" "$ROOM_ACTIVE" "$ROOM_ETRANGER"
+  verif_choisie 3 && verif3_garde_reservation "$PASSE" "$ROOM_ETRANGER" "$NOM_ETRANGER" "$ROOM_DESACTIVEE"
+  verif_choisie 4 && verif4_apparence "$PASSE" "$ATTENDU_SRLM"
 
-  if [ "$APPLIQUER" -eq 1 ]; then
+  if ! verif_choisie 5; then
+    :
+  elif [ "$APPLIQUER" -eq 1 ]; then
     if [ "$VIKSTRIPE_TEST_KEYS_OK" -eq 1 ]; then
       verif5_6_reservation_reelle "$PASSE" "$ROOM_ACTIVE"
     else
@@ -1114,12 +1164,15 @@ for PASSE in sexcaperoom linstantcle; do
   fi
 done
 
-verif8_liste_blanche
+verif_choisie 8 && verif8_liste_blanche
 
 imprimer_rapport "Rapport"
 RC_RAPPORT=$?
 
-if [ "$APPLIQUER" -eq 0 ]; then
+if [ -n "$VERIFS_CHOISIES" ]; then
+  echo
+  jaune "Recette partielle : seules les vérifications$VERIFS_CHOISIES ont été menées."
+elif [ "$APPLIQUER" -eq 0 ]; then
   echo
   jaune "Simulation partielle : --appliquer n'a pas été passé. Vérifications 5, 6 et 7 non menées."
 fi
