@@ -45,6 +45,25 @@
 #                           réservation d'essai encore ouverte dans le registre
 #                           local pour cet hôte — quand Vik la propose. Ne
 #                           relance aucune vérification.
+#   --reserver CHAMBRE      crée UNE réservation d'essai par le parcours client
+#                           réel (recherche -> devis -> coordonnées -> saveorder),
+#                           jusqu'au lien Stripe Checkout, et rien de plus :
+#                           Thomas paie lui-même avec ce lien (plan-de-marche.md
+#                           2.21, décision 2 du 26 septembre). Exige --arrivee
+#                           et --nuits. Adresse de recette, inscription au
+#                           registre (en_attente_reprise), levier posé sur l'hôte
+#                           de la marque de la chambre lu dans lme-brands. Refuse
+#                           une date où la chambre, ou une chambre qui partage
+#                           son calendrier (sir_vikbooking_calendars_xref et
+#                           availability_group de lme-brands), est occupée ou
+#                           tenue par un verrou temporaire. Ne rouvre jamais la
+#                           vue booking : seul l'affichage où saveorder()
+#                           redirige lui-même a lieu, dans la seconde qui suit
+#                           la création (docs/briefs/constat-reservation-essai.md).
+#                           Incompatible avec --appliquer, --verification,
+#                           --reprise et --nettoyer.
+#   --arrivee AAAA-MM-JJ    date d'arrivée de --reserver, aujourd'hui ou après
+#   --nuits N               nombre de nuits de --reserver, entier de 1 à 30
 #   --journal FICHIER       recopie toute la sortie dans FICHIER (ajout en fin),
 #                           sans tube chez l'appelant : le code de sortie reste
 #                           celui du script. Préférer cette option à « | tee ».
@@ -52,7 +71,9 @@
 #
 # Code de sortie : 0 si toutes les vérifications menées sont OK ; 2 si au
 # moins une est KO ou non concluante (??), y compris un KO annoncé comme la
-# vérification 8 ; 1 sur un préalable au rouge ou une erreur. La dernière
+# vérification 8 ; 1 sur un préalable au rouge ou une erreur. Avec
+# --reserver : 0 si le lien Stripe Checkout est rendu, 2 sinon (date
+# refusée, refus de Vik, lien absent, réservation dans un état inattendu). La dernière
 # ligne imprimée est toujours « SORTIE=<code> », lisible même quand la
 # sortie passe par un tube. Sous zsh, « a | tee f » rend le code de tee :
 # utiliser --journal, ou « setopt pipefail », ou lire $pipestatus[1].
@@ -75,6 +96,9 @@ APPLIQUER=0
 NETTOYER=0
 REPRISE_IDORDER=""
 VERIFICATIONS=""
+RESERVER_ROOM=""
+RESERVER_ARRIVEE=""
+RESERVER_NUITS=""
 
 # Identité des réservations d'essai : reconnaissable au premier coup d'œil
 # dans l'administration de Vik, jamais confondue avec un vrai client
@@ -115,7 +139,7 @@ mourir(){ rouge "ERREUR : $*"; exit 1; }
 # Remplacé plus bas par restore_override_on_exit, qui imprime la même ligne.
 trap 'rc_sortie=$?; printf "\nSORTIE=%s\n" "$rc_sortie"; exit "$rc_sortie"' EXIT
 
-usage() { sed -n '2,66p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,88p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 JOURNAL=""
 declare -a ARGS_SANS_JOURNAL=()
@@ -128,6 +152,9 @@ while [ $# -gt 0 ]; do
     --reprise)         REPRISE_IDORDER="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
     --nettoyer)        NETTOYER=1; ARGS_SANS_JOURNAL+=("$1"); shift ;;
     --verification)    VERIFICATIONS="${VERIFICATIONS:+$VERIFICATIONS,}${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
+    --reserver)        RESERVER_ROOM="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
+    --arrivee)         RESERVER_ARRIVEE="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
+    --nuits)           RESERVER_NUITS="${2:-}"; ARGS_SANS_JOURNAL+=("$1" "${2:-}"); shift 2 ;;
     --journal)         JOURNAL="${2:-}"; shift 2 ;;
     -h|--help)         usage; exit 0 ;;
     *) mourir "option inconnue : $1 (--help pour l'usage)" ;;
@@ -147,6 +174,28 @@ if [ -n "$REPRISE_IDORDER" ]; then
   case "$REPRISE_IDORDER" in
     ''|*[!0-9]*) mourir "--reprise attend un identifiant de réservation numérique, reçu '$REPRISE_IDORDER'" ;;
   esac
+fi
+
+# --reserver : un mode à part, qui ne se combine avec aucun autre. Les dates
+# sont validées ici ; le refus d'une date occupée se fait sur la cible, avec
+# les horodatages que Vik lui-même a calculés (reserver_une, plus bas).
+if [ -n "$RESERVER_ROOM" ] || [ -n "$RESERVER_ARRIVEE" ] || [ -n "$RESERVER_NUITS" ]; then
+  [ -n "$RESERVER_ROOM" ] && [ -n "$RESERVER_ARRIVEE" ] && [ -n "$RESERVER_NUITS" ] \
+    || mourir "--reserver, --arrivee et --nuits vont ensemble, les trois sont obligatoires"
+  [ "$APPLIQUER" -eq 0 ] && [ -z "$VERIFICATIONS" ] && [ -z "$REPRISE_IDORDER" ] && [ "$NETTOYER" -eq 0 ] \
+    || mourir "--reserver ne se combine ni avec --appliquer, ni avec --verification, ni avec --reprise, ni avec --nettoyer"
+  case "$RESERVER_ROOM" in ''|*[!0-9]*) mourir "--reserver attend un identifiant de chambre numérique, reçu '$RESERVER_ROOM'" ;; esac
+  case "$RESERVER_NUITS" in ''|*[!0-9]*) mourir "--nuits attend un entier, reçu '$RESERVER_NUITS'" ;; esac
+  [ "$RESERVER_NUITS" -ge 1 ] && [ "$RESERVER_NUITS" -le 30 ] || mourir "--nuits attend un entier de 1 à 30, reçu '$RESERVER_NUITS'"
+  printf '%s' "$RESERVER_ARRIVEE" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+    || mourir "--arrivee attend une date AAAA-MM-JJ, reçu '$RESERVER_ARRIVEE'"
+  # Aller-retour par date(1) : une date impossible (2026-02-30) ne revient pas identique.
+  [ "$(date -u -j -f '%Y-%m-%d' "$RESERVER_ARRIVEE" +%Y-%m-%d 2>/dev/null || date -u -d "$RESERVER_ARRIVEE" +%Y-%m-%d 2>/dev/null)" = "$RESERVER_ARRIVEE" ] \
+    || mourir "--arrivee : '$RESERVER_ARRIVEE' n'est pas une date du calendrier"
+  # Vik annule à l'affichage une réservation en attente dont l'arrivée est
+  # passée (site/views/booking/view.html.php) : jamais une date antérieure.
+  [ "$RESERVER_ARRIVEE" \< "$(date -u +%Y-%m-%d)" ] \
+    && mourir "--arrivee : '$RESERVER_ARRIVEE' est dans le passé"
 fi
 
 # Vérifications choisies : « 2 3 » entre espaces, ou vide pour toutes. Une
@@ -496,6 +545,52 @@ case "$MODE" in
       if [ -e "$BASE/wp-content/plugins/vikchannelmanager" ]; then STATUT=fichiers_presents; else STATUT=absent; fi
     fi
     kv VCM_STATUS "$STATUT"
+    exit 0
+    ;;
+
+  room-facts)
+    # Faits d'une chambre dans le registre de lme-brands tel que chargé sur la
+    # cible : statut de résolution, marque, hôte de la marque, et les autres
+    # chambres de son availability_group. Rendu en une seule valeur
+    # hexadécimale de « statut|marque|hôte|ids », décodée en local : même
+    # précaution que resolve-brand-key contre TranslatePress.
+    ROOM="$3"
+    case "$ROOM" in ''|*[!0-9]*) err "identifiant de chambre non numérique"; exit 1 ;; esac
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    HEX=$(wp eval '$c = lme_brands_get_config(); $r = lme_brands_resolve_room( $c, '"$ROOM"' ); $b = ( "ok" === $r["status"] ) ? (string) $r["brand_key"] : ""; $h = ( "" !== $b && isset( $c["brands"][ $b ]["host"] ) ) ? (string) $c["brands"][ $b ]["host"] : ""; $g = isset( $c["rooms"]['"$ROOM"']["availability_group"] ) ? $c["rooms"]['"$ROOM"']["availability_group"] : null; $ids = array(); if ( null !== $g ) { foreach ( (array) $c["rooms"] as $id => $room ) { if ( (int) $id !== '"$ROOM"' && isset( $room["availability_group"] ) && $room["availability_group"] === $g ) { $ids[] = (int) $id; } } } echo bin2hex( $r["status"] . "|" . $b . "|" . $h . "|" . implode( ",", $ids ) );' --path="$BASE" 2>/dev/null)
+    kv FACTS_HEX "${HEX:-}"
+    exit 0
+    ;;
+
+  stay-conflicts)
+    # Ce qui occupe la chambre ou une chambre qui partage son calendrier
+    # entre CI et CO, horodatages que Vik a lui-même calculés à la recherche.
+    # Chambres visées : la chambre, celles que la table des calendriers
+    # partagés de Vik lui relie dans les deux sens (ce que lit
+    # updateSharedCalendars(), site/helpers/lib.vikbooking.php:6701), et
+    # celles de son availability_group dans lme-brands (AUTRES, passé par
+    # l'appelant). Occupations (sir_vikbooking_busy, jusqu'à realback, le
+    # battement de ménage compris, comme roomBookable()) et verrous
+    # temporaires encore valides (sir_vikbooking_tmplock). Des nombres
+    # seulement : aucun nom, aucune adresse de client.
+    ROOM="$3"; CI="$4"; CO="$5"; AUTRES="$6"
+    for v in "$ROOM" "$CI" "$CO"; do case "$v" in ''|*[!0-9]*) err "argument non numérique : $v"; exit 1 ;; esac; done
+    case "$AUTRES" in -) AUTRES="" ;; *[!0-9,]*) err "liste de chambres invalide : $AUTRES"; exit 1 ;; esac
+    command -v wp >/dev/null 2>&1 || { err "wp-cli introuvable"; exit 1; }
+    XREF=$(wp db query "SELECT childroom FROM sir_vikbooking_calendars_xref WHERE mainroom = ${ROOM} UNION SELECT mainroom FROM sir_vikbooking_calendars_xref WHERE childroom = ${ROOM}" --path="$BASE" --skip-column-names 2>/dev/null) \
+      || { err "wp db query a échoué : calendriers partagés illisibles"; exit 1; }
+    XREF=$(printf '%s\n' "$XREF" | grep -E '^[0-9]+$' | sort -un | paste -sd, -)
+    LISTE=$(printf '%s\n' "$ROOM" $(printf '%s' "$XREF,$AUTRES" | tr ',' ' ') | grep -E '^[0-9]+$' | sort -un | paste -sd, -)
+    BUSY=$(wp db query "SELECT b.id, b.idroom, b.checkin, b.checkout, b.sharedcal, IFNULL(ob.idorder, 0) FROM sir_vikbooking_busy b LEFT JOIN sir_vikbooking_ordersbusy ob ON ob.idbusy = b.id WHERE b.idroom IN (${LISTE}) AND b.checkin < ${CO} AND IFNULL(b.realback, b.checkout) > ${CI} ORDER BY b.idroom, b.checkin" --path="$BASE" --skip-column-names 2>/dev/null) \
+      || { err "wp db query a échoué : occupations illisibles"; exit 1; }
+    LOCKS=$(wp db query "SELECT id, idroom, checkin, checkout, until, IFNULL(idorder, 0) FROM sir_vikbooking_tmplock WHERE idroom IN (${LISTE}) AND until > UNIX_TIMESTAMP() AND checkin < ${CO} AND IFNULL(realback, checkout) > ${CI} ORDER BY idroom, checkin" --path="$BASE" --skip-column-names 2>/dev/null) \
+      || { err "wp db query a échoué : verrous temporaires illisibles"; exit 1; }
+    kv XREF "${XREF:--}"
+    kv LISTE "$LISTE"
+    kv NBUSY "$(printf '%s\n' "$BUSY" | grep -c . || true)"
+    kv BUSY "$(printf '%s' "$BUSY" | tr '\n\t' ';:')"
+    kv NLOCKS "$(printf '%s\n' "$LOCKS" | grep -c . || true)"
+    kv LOCKS "$(printf '%s' "$LOCKS" | tr '\n\t' ';:')"
     exit 0
     ;;
 
@@ -1102,6 +1197,11 @@ source "$REPO_ROOT/recetter-moteur-vik.sh"
 # (constat-reprise-1830-1831.md §3.3).
 run_preconditions
 [ "$PRECOND_OK" -eq 1 ] || mourir "au moins un préalable est au rouge — voir ci-dessus, ce script refuse de deviner"
+
+if [ -n "$RESERVER_ROOM" ]; then
+  reserver_une "$RESERVER_ROOM" "$RESERVER_ARRIVEE" "$RESERVER_NUITS"
+  exit $?
+fi
 
 if [ "$NETTOYER" -eq 1 ]; then
   titre "Nettoyage — $HOTE"

@@ -171,7 +171,8 @@ vik_curl_post_brut() {
 # vik_creer_reservation ROOM_ID CHECKIN(YYYY-MM-DD) NUITS
 #
 # Résultat dans CREATE_STATUT : created | creee_sur_erreur | refused_403 |
-#                                refus_vik | ambigu | indetermine | erreur
+#                                refus_vik | ambigu | indetermine | erreur |
+#                                date_refusee (VIK_CONTROLE_DATES, rien soumis)
 # Sur created : CREATE_SID, CREATE_TS, CREATE_IDORDER, CREATE_REDIRECT_URL,
 #               CREATE_STRIPE_HREF (lien Stripe Checkout relevé dans la page,
 #               vide si absent — voir extraire_href_stripe_wrapper()).
@@ -228,6 +229,15 @@ vik_creer_reservation() {
   if [ -z "$checkin_ts" ] || [ -z "$checkout_ts" ]; then
     rouge "  aucun résultat exploitable pour la chambre #$room_id aux dates demandées ($checkin_ddmmyyyy -> $checkout_ddmmyyyy) : checkin/checkout absents de la réponse"
     CREATE_STATUT="erreur"
+    return 1
+  fi
+
+  # 1 bis. Contrôle facultatif de l'appelant, avec les horodatages que Vik
+  #    vient de calculer : VIK_CONTROLE_DATES nomme une fonction appelée avec
+  #    ROOM_ID CHECKIN_TS CHECKOUT_TS, qui rend 0 pour continuer. Sinon, rien
+  #    n'est soumis au-delà de la recherche, qui n'écrit rien.
+  if [ -n "${VIK_CONTROLE_DATES:-}" ] && ! "$VIK_CONTROLE_DATES" "$room_id" "$checkin_ts" "$checkout_ts"; then
+    CREATE_STATUT="date_refusee"
     return 1
   fi
 
@@ -925,4 +935,139 @@ reprendre_reservation() {
   fi
 
   imprimer_rapport "Rapport (reprise #$idorder)"
+}
+
+# ======================================================= réservation d'essai
+#
+# --reserver CHAMBRE --arrivee AAAA-MM-JJ --nuits N (plan-de-marche.md 2.21,
+# décision 2 du 26 septembre) : une seule réservation par le parcours client
+# réel, jusqu'au lien Stripe Checkout. Thomas paie lui-même avec ce lien.
+#
+# La vue booking écrit à l'affichage (site/views/booking/view.html.php,
+# branche standby) : elle annule une réservation en attente si la chambre
+# n'est plus réservable, si l'arrivée est passée, ou si minautoremove est
+# écoulé, et supprime alors ses occupations (constat-vues-vik-par-view.md §4).
+# Le lien Stripe n'existe pourtant que là : saveorder() redirige lui-même
+# vers view=booking&sid=…&ts=… (site/controller.php:1642) et VikStripe crée
+# la session Checkout pendant cet affichage. Décision de Thomas du
+# 26 septembre : suivre cette redirection-là, une fois, dans la seconde qui
+# suit la création, et jamais rouvrir la vue ensuite. La date est contrôlée
+# libre juste avant, l'arrivée n'est pas passée (contrôle des arguments), et
+# l'état est relu en base après l'affichage.
+
+# controle_dates_libres ROOM_ID CHECKIN_TS CHECKOUT_TS : 0 si rien n'occupe
+# ni ne verrouille la chambre ou une chambre qui partage son calendrier.
+# Toute occupation compte, quel que soit le nombre d'unités : la décision est
+# prise ici, jamais laissée à Vik.
+RESERVER_AUTRES_CHAMBRES="-"
+controle_dates_libres() {
+  local room="$1" ci="$2" co="$3" out
+  if ! out=$(remote_call stay-conflicts "$room" "$ci" "$co" "$RESERVER_AUTRES_CHAMBRES"); then
+    rouge "  KO   occupations illisibles : date non contrôlée, réservation refusée"
+    return 1
+  fi
+  local liste xref nbusy nlocks
+  liste=$(printf '%s\n' "$out" | kv_get LISTE)
+  xref=$(printf '%s\n' "$out" | kv_get XREF)
+  nbusy=$(printf '%s\n' "$out" | kv_get NBUSY)
+  nlocks=$(printf '%s\n' "$out" | kv_get NLOCKS)
+  info "  chambres contrôlées : $liste (calendriers partagés de Vik : $xref ; groupe lme-brands : $RESERVER_AUTRES_CHAMBRES)"
+  info "  séjour selon Vik : $(date -u -r "$ci" '+%Y-%m-%d %H:%M' 2>/dev/null || date -u -d "@$ci" '+%Y-%m-%d %H:%M') -> $(date -u -r "$co" '+%Y-%m-%d %H:%M' 2>/dev/null || date -u -d "@$co" '+%Y-%m-%d %H:%M') UTC"
+  case "$nbusy$nlocks" in *[!0-9]*|'') rouge "  KO   réponse de la cible incomplète : date non contrôlée, réservation refusée"; return 1 ;; esac
+  if [ "$nbusy" -eq 0 ] && [ "$nlocks" -eq 0 ]; then
+    vert "  OK   aucune occupation ni verrou temporaire sur ces chambres à ces dates"
+    return 0
+  fi
+  local r id idroom rci rco partage idorder until
+  for r in $(printf '%s\n' "$out" | kv_get BUSY | tr ';' ' '); do
+    IFS=: read -r id idroom rci rco partage idorder <<< "$r"
+    rouge "  occupé   chambre #$idroom, occupation $id, réservation #$idorder, $(ts_vers_iso "$rci") -> $(ts_vers_iso "$rco")$([ "$partage" = "1" ] && echo ', reportée par calendrier partagé')"
+  done
+  for r in $(printf '%s\n' "$out" | kv_get LOCKS | tr ';' ' '); do
+    IFS=: read -r id idroom rci rco until idorder <<< "$r"
+    rouge "  verrou   chambre #$idroom, réservation #$idorder en attente, $(ts_vers_iso "$rci") -> $(ts_vers_iso "$rco"), jusqu'à $(date -u -r "$until" +%H:%M 2>/dev/null || date -u -d "@$until" +%H:%M) UTC"
+  done
+  rouge "  KO   date refusée : $nbusy occupation(s), $nlocks verrou(s) temporaire(s) — rien n'a été soumis au-delà de la recherche"
+  return 1
+}
+
+# reserver_une ROOM_ID ARRIVEE NUITS : 0 si le lien Stripe Checkout est rendu.
+reserver_une() {
+  local room="$1" arrivee="$2" nuits="$3"
+  titre "Réservation d'essai — chambre #$room, arrivée $arrivee, $nuits nuit(s)"
+
+  [ "$VIKSTRIPE_TEST_KEYS_OK" -eq 1 ] \
+    || mourir "VikStripe n'est pas en clés de test sur $HOTE : aucune réservation d'essai"
+
+  # Marque, hôte de la marque et groupe de calendrier : lus dans lme-brands
+  # sur la cible, jamais tenus ici.
+  local out hex faits statut marque hote_marque
+  out=$(remote_call room-facts "$room") || mourir "registre de lme-brands illisible pour la chambre #$room"
+  hex=$(printf '%s\n' "$out" | kv_get FACTS_HEX)
+  faits=$(php -r 'echo (string) @hex2bin( $argv[1] );' -- "$hex")
+  IFS='|' read -r statut marque hote_marque RESERVER_AUTRES_CHAMBRES <<< "$faits"
+  [ "$statut" = "ok" ] && [ -n "$marque" ] && [ -n "$hote_marque" ] \
+    || mourir "chambre #$room : le registre de lme-brands ne lui donne ni marque ni hôte (statut '${statut:-illisible}')"
+  [ -n "$RESERVER_AUTRES_CHAMBRES" ] || RESERVER_AUTRES_CHAMBRES="-"
+  info "chambre #$room : marque '$marque', hôte '$hote_marque', groupe de calendrier lme-brands : $RESERVER_AUTRES_CHAMBRES"
+
+  # Levier sur l'hôte de la marque de la chambre : sans lui, la garde de
+  # lme-brands refuserait une chambre de l'autre marque en 403.
+  capture_override_original
+  set_override "$hote_marque"
+  local attendu_hex
+  attendu_hex=$(printf '%s' "$marque" | od -An -tx1 | tr -d ' \n')
+  [ "$(remote_call resolve-brand-key | kv_get BRAND_KEY_HEX)" = "$attendu_hex" ] \
+    || mourir "le levier posé sur '$hote_marque' ne résout pas la marque '$marque'"
+  vert "  OK   levier posé sur $hote_marque, marque '$marque' résolue"
+
+  VIK_CONTROLE_DATES=controle_dates_libres
+  vik_creer_reservation "$room" "$arrivee" "$nuits"
+  VIK_CONTROLE_DATES=""
+
+  case "$CREATE_STATUT" in
+    created) ;;
+    creee_sur_erreur)
+      registre_ajoute "$CREATE_IDORDER" "$CREATE_SID" "$CREATE_TS" "$marque" "$room" "a_nettoyer"
+      rouge "  KO   réservation #$CREATE_IDORDER insérée, mais la soumission finale a répondu $VIK_LAST_CODE : aucun lien Stripe. Inscrite au registre, à nettoyer"
+      return 2 ;;
+    date_refusee)
+      return 2 ;;
+    indetermine)
+      rouge "  KO   soumission finale en échec, présence de la réservation indéterminée : chercher $CREATE_COURRIEL dans Bookings. Hors registre"
+      return 2 ;;
+    *)
+      rouge "  KO   réservation non créée (statut '$CREATE_STATUT', $CREATE_ABSENCE)${CREATE_MESSAGE_VIK:+ : « $CREATE_MESSAGE_VIK »}"
+      return 2 ;;
+  esac
+
+  if [ -z "$CREATE_IDORDER" ]; then
+    rouge "  KO   réservation créée (sid=$CREATE_SID, $CREATE_COURRIEL) mais son identifiant est illisible : hors registre, à retrouver dans Bookings"
+    return 2
+  fi
+  registre_ajoute "$CREATE_IDORDER" "$CREATE_SID" "$CREATE_TS" "$marque" "$room" "en_attente_reprise"
+  vert "  OK   réservation #$CREATE_IDORDER créée (sid=$CREATE_SID), inscrite au registre"
+
+  # L'affichage qui vient d'avoir lieu est celui qui aurait pu annuler : l'état
+  # se relit en base, jamais sur la page.
+  if ! lire_faits_reservation "$CREATE_IDORDER"; then
+    rouge "  KO   #$CREATE_IDORDER illisible en base après l'affichage"
+    return 2
+  fi
+  if [ "$FAIT_STATUS" != "standby" ] || [ "$FAIT_COURRIEL" != "$CREATE_COURRIEL" ]; then
+    rouge "  KO   #$CREATE_IDORDER relue en base : statut '$FAIT_STATUS', adresse '$FAIT_COURRIEL' ; attendu 'standby' et $CREATE_COURRIEL"
+    registre_maj_statut "$CREATE_IDORDER" "a_nettoyer"
+    return 2
+  fi
+  vert "  OK   #$CREATE_IDORDER relue en base : standby, adresse de recette"
+
+  if ! printf '%s' "$CREATE_STRIPE_HREF" | grep -qiE '^https://checkout\.stripe\.com/'; then
+    rouge "  KO   aucun lien checkout.stripe.com dans la page (valeur relevée : '${CREATE_STRIPE_HREF:-vide}')"
+    registre_maj_statut "$CREATE_IDORDER" "a_nettoyer"
+    return 2
+  fi
+  echo
+  vert "Réservation #$CREATE_IDORDER, chambre #$room, arrivée $arrivee, $nuits nuit(s) — lien Stripe Checkout, clés de test :"
+  echo "$CREATE_STRIPE_HREF"
+  return 0
 }
