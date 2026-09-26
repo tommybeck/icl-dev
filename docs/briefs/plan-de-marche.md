@@ -1,6 +1,6 @@
 # Plan de marche — réservation Sexcape Room
 
-**Version 2.20, 25 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.20 établit que la marque d'expéditeur des confirmations arrive jusqu'au client, dans les deux marques, et ferme B9i.
+**Version 2.21, 26 septembre 2026.** La version 2 du 17 septembre remplaçait la version 1 du 9, devenue fausse sur la moitié de ses lignes. La 2.21 ferme la vérification 7, applique F1, F2 et F3 sur la préproduction par une recette scriptée, aligne l'adresse de réponse de B5, ferme G0, et consigne quatre décisions du 26 septembre, chapitre 2, « Décisions du 26 septembre ».
 
 Documents de référence : `sexcape-room-reservation.md` pour le quoi, `constat-phase-0.md` pour l'établi, `handoff-acces-mysql.md` pour les accès, `revue-tarifs.md` et `convention-tarifs-annuelle.md` pour le chantier A, `constat-reserve-paiement.md` pour la réserve de paiement, `constat-phase-3-emails.md` pour les e-mails, `constat-incident-1818.md` et `revue-constat-vikstripe-b4b.md` pour le défaut de réconciliation et le signalement à l'éditeur.
 
@@ -24,6 +24,8 @@ Ce n'est pas une répartition par difficulté, c'est une répartition par **mati
 
 **Le compte MySQL est en lecture seule, et le reste.** Décision du 12 septembre 2026. Code lit, vérifie et constate ; il n'écrit jamais dans la base. Quand une correction est nécessaire, la chaîne est toujours la même : Cowork la formule, Thomas l'exécute dans Vik, Code la vérifie par requête.
 
+**Exception du 26 septembre 2026, pour trois tables seulement** : `sir_vikbooking_condtexts`, `sir_vikbooking_cronjobs` et `sir_vikbooking_adultsdiff`. On y écrit par une recette versionnée dans `recettes-vik/`, exécutée par `appliquer-recette-vik.sh` : simulation par défaut, refus d'environnement, sauvegarde, `--rollback`, idempotente. Code la lance sur la préproduction, **Thomas seul en production**. Tarifs, saisons et restrictions restent dans les écrans de Vik, qui les poussent vers Airbnb et Booking.com. Détail dans `CLAUDE.md` et `brief-f3-rappel-avant-sejour.md`.
+
 ### Règle du fichier unique
 
 **Un fichier, un auteur.** Code écrit les constats, Cowork écrit les revues et les briefs.
@@ -40,15 +42,15 @@ Rien d'important ne vit dans une conversation. Une conclusion qui n'est pas écr
 
 ## 2. Les chantiers
 
-| Chantier | Tenu par | État au 20 septembre |
+| Chantier | Tenu par | État au 26 septembre |
 |---|---|---|
 | **A. Tarifs** | Code, Thomas, Cowork | en cours, A1 à A4 faits, A5 à A8 ouverts |
-| **B. Moteur** | Code | B1 à B5, B4a, B4b et B8 faits. **Rien n'est déployé, et le prochain geste est celui de Thomas.** Revue de B5 ouverte ; B6 et B7 attendent une décision |
+| **B. Moteur** | Code | Tout le tableau B fait et revu sauf B6, B7, B11b et B10. Déployé **en préproduction seulement**. **Rien en production** ; B10 attend B11b, G2, G2b et G3 |
 | **C. Infrastructure** | Thomas | fait, sauf l'observation DMARC en cours |
 | **D. Habillage** | Cowork puis Code | D1 et D2 faits, D3 et D4 ouverts |
 | **E. Surveillance** | Cowork | pas commencé, attend A5 |
-| **F. Contenu des e-mails de Vik** | Thomas | **le plus urgent des ouverts**, F3 avant la première vente des chambres 8, 9 et 10 |
-| **G. Verrou d'hôte** | Cowork puis Code | G1 fait le 19 septembre, G2 lançable, G3 ajouté |
+| **F. Contenu des e-mails de Vik** | Code puis Thomas | F1, F2 et F3 **appliqués sur la préproduction** par la recette F3 le 26 septembre ; **production : Thomas lance la recette** |
+| **G. Verrou d'hôte** | Cowork puis Code | G1 et G0 faits ; **G2 lançable** ; G2b porte aussi l'en-tête de cache ; G3 ouvert |
 | **H. Signalement à l'éditeur** | Cowork puis Thomas | **nouveau**, ouvert par B4b |
 
 ### A. Tarifs
@@ -90,11 +92,13 @@ Reste ouvert sans instruction : l'asymétrie de tarification par occupation entr
 | B9f | Recette automatisée : transcription d'enveloppe et `recetter-moteur.sh` | Sonnet 5, moyen | **fait** le 23 septembre, commit `42cc5b1`, `constat-recette-automatisee.md`, revue faite |
 | B9h | Établir pourquoi la garde ne rend pas de `403` net en passe L'Instant Clé | Sonnet 5, faible | **fait** le 24 septembre, commit `5d498dc`. Le verrou de Vik posé par la propre réservation du script, pas la garde ; dates séparées, `403` dans les deux sens |
 | B11 | Corriger `room-filter.php` et la vérification 2 | Sonnet 5, moyen | **fait** le 24 septembre, commit `d8c1753`, `constat-correctif-room-filter.md`, revue faite. Vérification 2 verte dans les deux sens |
-| B9j | Inventorier les intégrations sortantes, refuser toute réservation si Vik Channel Manager est actif, durcir le garde-fou sur `phpmailer_init` | Sonnet 5, moyen | **fait** le 24 septembre, commit `fb92b1c`, `constat-integrations-sortantes.md`, revue faite. **Garde-fou 1.1.0 pas encore déployé** |
+| B9j | Inventorier les intégrations sortantes, refuser toute réservation si Vik Channel Manager est actif, durcir le garde-fou sur `phpmailer_init` | Sonnet 5, moyen | **fait** le 24 septembre, commit `fb92b1c`, `constat-integrations-sortantes.md`, revue faite. Garde-fou 1.1.0 **déployé sur `staging13`**, empreintes identiques au dépôt (`constat-reprise-1836-1837.md` §1) |
 | B9i | Corriger le script de reprise, lire la transcription entière, établir le crochet du rappel et le refus d'annulation | Opus 5.5, moyen | **fait** le 25 septembre, commit `ce801e4`, `constat-reprise-1836-1837.md`, revue faite |
 | B11b | Recenser les autres vues de Vik joignables par `view`, et corriger `constat-phase-0.md` Q4 | Sonnet 5, faible | ouvert, avant B10 |
+| B12 | Aligner l'adresse de réponse des messages de B5 sur l'expéditeur de la marque | Opus 5.5, moyen | **fait** le 26 septembre, commit `a7f57e9`, `constat-b5-rappels.md` §10, revue faite. **Pas déployé.** Numéros de ligne relus sur Vik 1.8.14 seulement : à revérifier sur 1.8.15 au prochain déploiement en préproduction |
+| B13 | Recette F3 : textes conditionnels, gabarit du rappel, suppléments d'À Huis Clos, par `appliquer-recette-vik.sh` | Opus 5.5, moyen | **fait** le 26 septembre, commits `1b61243` et `4303df6`, `constat-recette-f3.md`, revue faite. Appliquée sur `staging13`, retour arrière éprouvé, chapitre 4 rejoué : six blocs pleins pour les chambres 4, 10 et 8. **Production : Thomas** |
 | B9g | Faire relever par `recetter-moteur.sh` le lien Stripe Checkout sur la page du bouton PAY NOW, puis rendre la main au navigateur | Sonnet 5, faible | **fait** le 24 septembre, commit `f246db6`. Les deux passes atteignent Stripe Checkout, réservations 1828 et 1829 |
-| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis restants : la vérification 7, B11b, G0 et G3** |
+| B10 | Déployer en production, après la recette | Thomas, décision séparée | ouvert. **Prérequis restants : B11b et G3** (G3 suppose G2 et G2b). La vérification 7 et G0 sont faits |
 
 Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette règle a été enfreinte une fois** : B5 est livrée depuis le 17 septembre et n'a été revue par personne, tombée entre la revue de la phase 4 et l'incident 1818 du même jour.
 
@@ -148,6 +152,21 @@ Après chaque phase : **revue par Cowork** avant d'ouvrir la suivante. **Cette r
 **Ne pas toucher au réglage.** Le basculer ne débloquerait rien pour le script, et le faire un jour en production changerait le parcours des clients sans raison.
 
 **Et une promesse de mon brief qui ne tenait pas.** J'avais posé que `--nettoyer` annulerait les réservations d'essai par le contrôleur de Vik. `task=docancelbooking` exige `status = 'confirmed'` : une commande `standby` y répond `403`, testé pour de vrai. **La règle de nettoyage change donc** : ce que le script ne peut pas annuler, il le **marque et le recense**, et la reprise revient à l'administration de Vik ou au balayage de la parade D. Deux réservations restent sur la préproduction, **1826** et **1827**, au nom `RECETTE AUTOMATISEE - NE PAS TRAITER`, sans paiement.
+
+### Décisions du 26 septembre
+
+1. **Écriture en base par recette versionnée**, pour trois tables seulement : voir chapitre 1. Première recette : F3 (B13).
+2. **Les réservations d'essai se créent par `recetter-moteur.sh`, jusqu'au paiement.** Code crée la réservation et rend le lien Stripe Checkout ; **Thomas paie lui-même**, en clés de test, avec ce lien. Plus de création dans l'administration de Vik : le 26 septembre, 1838 à 1841 y ont été créées faute de mieux, sans passer par le tunnel, donc sans exercer le moteur. **À prévoir dans le script** : une option qui choisit la chambre et la date d'arrivée, les dates étant aujourd'hui fixées par décalage (J+60, J+75, J+90), ce qui ne permet pas de tomber dans la fenêtre du rappel à deux jours.
+3. **L'adresse de réponse suit l'expéditeur de la marque**, pour les messages de B5 comme pour les confirmations (B12).
+4. **Toute valeur texte lue sur linstantcle.ch par EMCP ou par WP-CLI se relit en base64, en hexadécimal ou par empreinte.** Les deux sorties passent par une traduction à la volée : `staging` rendu « mise en scène », jetons `{condition: x}` rendus `{condition : x}`, prose paraphrasée. Cowork en a tiré le 26 septembre un faux défaut du gabarit, retiré dans `brief-f3-rappel-avant-sejour.md` 1.1.
+
+### La vérification 7 et la recette F3, 26 septembre
+
+**Vérification 7 établie** (`constat-verification-7.md`). Un seul passage de la tâche 7 sur `staging13` a composé trois rappels : `reservations@sexcaperoom.ch` pour 1434 et 1823, `reservations@linstantcle.ch` pour 1838. Thomas a relu les en-têtes bruts : Gmail n'a pas réécrit le `From`. **Correction du §4.3 de `constat-reprise-1836-1837.md`** : la fenêtre se calcule en UTC, pas dans le fuseau du site.
+
+**Recette F3 appliquée sur `staging13`** (`constat-recette-f3.md`). 23 opérations, simulation, refus d'environnement, écart provoqué, retour arrière et réapplication éprouvés. Le lancement avec `--env production` était un **essai de refus**, en simulation, sur `staging13` : le script a refusé, comme il le doit. Chapitre 4 rejoué sur 1839, 1840 et 1841 : aucun blanc, code de porte des suites vide.
+
+**Levier de préproduction** : `LME_BRANDS_HOST_OVERRIDE` reste réglé sur Sexcape Room. Il ne fausse ni l'expéditeur ni le détournement, mais le journal du garde-fou attribue à tort tous les messages à Sexcape Room. Laissé en place.
 
 ### La marque d'expéditeur arrive jusqu'au client — 25 septembre
 
@@ -280,7 +299,7 @@ Le script ne déclare plus « non créée » une réservation insérée malgré 
 | 4 | L'apparence Sexcape Room s'applique en passe Sexcape Room, et aucun jeton `--srlm-*` n'apparaît en passe L'Instant Clé | préproduction, deux passes, puis production |
 | 5 | Les en-têtes d'une confirmation portent l'expéditeur de la marque, pour les deux marques | préproduction, puis une vraie confirmation en production |
 | 6 | La session Stripe porte la métadonnée de marque, l'URL de retour pointe l'hôte appelant, la page de confirmation s'affiche | préproduction, clés de test |
-| 7 | Le rappel avant séjour part sous la bonne identité | préproduction, après la revue de B5 |
+| 7 | Le rappel avant séjour part sous la bonne identité | préproduction, **établie le 26 septembre** (`constat-verification-7.md`) : un passage, deux marques, deux expéditeurs ; `From` reçu intact, relu par Thomas |
 | 8 | Hors liste blanche, l'hôte redirige vers `sexcaperoom.ch` en 302 | préproduction puis production |
 
 ### Ce que la première recette a trouvé — 21 septembre
@@ -316,16 +335,6 @@ Les deux vont à **B9b**, brief `brief-correctif-levier-et-fatal-paiement.md`.
 **Le « Push to Live » de SiteGround est interdit.** Le garde-fou décide d'après `WP_ENVIRONMENT_TYPE` : un déploiement de la préproduction vers la production par l'outil natif y ferait remonter la valeur `staging`, et tous les e-mails clients partiraient vers l'adresse fourre-tout. Le déploiement passe par `deployer-moteur.sh`, jamais par Site Tools. **L'adresse fourre-tout elle-même vit aussi en production**, où elle est inerte : elle s'hérite ainsi de chaque copie de préproduction, et le jour où la détection se tromperait, le courrier client atterrit dans une boîte relevée plutôt que d'être abandonné.
 
 **Un effet de bord à connaître.** `deployer-moteur.sh` construit sa liste avec `git ls-files` sous `mu-plugins/` : ce greffon **partira au prochain déploiement**, sans décision séparée. C'est le revers de la liste dynamique qu'on a saluée en B9, et c'est voulu — en production, il est inerte.
-
-**Livré le 22 septembre, `constat-mail-guard.md`.** Les quatre défauts du brief sont corrigés, les deux durcissements sont en place, et la liste des hôtes de production est établie par preuve, inodes à l'appui, plutôt que devinée. Le greffon lit `$_SERVER['HTTP_HOST']` et non `home_url()`, donc il ne dépend plus de ce que `lme-brands` réécrit. Il ne touche ni `From`, ni `Sender`, ni `Reply-To`, et la vérification n°5 de la recette reste valable.
-
-**La réserve, et elle est bloquante.** `lme_mail_guard_is_production_context()` rend `false` dès que l'hôte est absent (`includes/core.php:48`), et c'est explicitement testé. Or **l'hôte est absent hors requête HTTP** : WP-CLI, et le cron s'il est lancé en ligne de commande. En production, un envoi dans ce contexte n'est donc pas reconnu comme production, l'adresse fourre-tout n'y étant pas définie il n'est pas non plus détourné, et `pre_wp_mail` l'abandonne. **Le message disparaît, et sans avertissement** : l'alerte du chapitre 2.b ne se déclenche que si l'hôte résout une marque, et un hôte nul n'en résout aucune.
-
-**La victime désignée est le rappel avant séjour**, tâche planifiée de Vik qui tourne toutes les heures. Selon la façon dont SiteGround déclenche le cron — boucle HTTP, qui porte un `HTTP_HOST`, ou appel en ligne de commande, qui n'en porte pas — les rappels de production partent ou disparaissent. **À établir, pas à supposer.**
-
-**Le correctif est court** : quand l'hôte est absent, décider sur `wp_get_environment_type()` seul. La préproduction, où il vaut `staging`, continue de tout détourner ; la production cesse d'avaler ses propres envois. Et dans tous les cas, **un abandon d'envoi se journalise**, avec ou sans marque résolue : la règle n°6 ne souffre pas d'exception pour les messages dont on ne sait pas à qui ils étaient destinés.
-
-**Un effet de bord à connaître.** `deployer-moteur.sh` construit sa liste avec `git ls-files` sous `mu-plugins/` : ce greffon **partira donc au prochain déploiement**, sans décision séparée. C'est le revers de la liste dynamique qu'on a saluée en B9, et cela veut dire que la réserve ci-dessus atteindrait la production en même temps que le moteur.
 
 ### B9d — les treize crochets sont vérifiés, et la règle reste
 
@@ -421,9 +430,9 @@ Trois défauts qui touchent des clients qui paient aujourd'hui, indépendants de
 | F2 | Donner une règle `rooms.php` aux textes conditionnels 70 à 73, inertes | chambres 8 et 9 |
 | F3 | Créer les blocs de check-in manquants pour les chambres 7, 8, 9 et 10 | quatre chambres sans nom, ni horaire, ni code de porte, ni adresse dans leur rappel |
 
-F1 est une minute de travail et le plus ancien des trois. **F3 doit précéder la première vente des chambres 8, 9 et 10**, qui rouvrent le 24 septembre.
+**Les trois sont réglés par la recette F3 du 26 septembre**, appliquée sur la préproduction (`brief-f3-rappel-avant-sejour.md`, `constat-recette-f3.md`). F1 : l'espace manquant du jeton du plan. F2 : les règles des textes 70 à 73. F3 : les chambres 7 et 10 rattachées aux textes de L'Entracte, les suites à son adresse, son parking et son plan avec leurs propres heures et un code de porte propre, et le nom du Boudoir, qui sortait « L'Aparté ». **En production, c'est Thomas qui lance la recette.**
 
-**Arbitrage préalable à F3 :** Vik groupe ses textes conditionnels par bâtiment, `maisonnette` (2, 4, 6) et `cinema` (1, 5) ; le brief groupe par calendrier, villa Aparté (2, 4) et villa Entracte (1, 7, 10). Les deux ne se recouvrent pas et la chambre 7 tombe entre les deux. À trancher avant de dupliquer, pas après.
+**Arbitrage tranché le 26 septembre** : on garde le groupement de Vik par bâtiment et on étend les règles, plutôt que de dupliquer les textes.
 
 ### G. Verrou d'hôte
 
@@ -432,10 +441,10 @@ Le brief `brief-verrou-hote-reservation.md` décrit ce chantier depuis le 12 sep
 | # | Quoi | Qui | État |
 |---|---|---|---|
 | G1 | Résorber la divergence du brief entre le dossier Communication et le dépôt | Thomas | **fait le 19 septembre** |
-| G0 | Deux gestes de Thomas avant G2 : exclure `reservation.sexcaperoom.ch` du cache dynamique SiteGround **et** de NitroPack ; et confirmer que la redirection reste un 302 jusqu'à la fin de la recette | Thomas | **ouvert**, et personne ne le portait jusqu'ici |
+| G0 | Deux gestes de Thomas avant G2 : exclure `reservation.sexcaperoom.ch` du cache dynamique SiteGround **et** de NitroPack ; et confirmer que la redirection reste un 302 jusqu'à la fin de la recette | Thomas | **fait le 26 septembre.** NitroPack : exclusion `*reservation.sexcaperoom.ch*` posée, aucun `HIT` mesuré par Thomas. SiteGround : l'écran Dynamic Cache n'offre pour cet hôte qu'une purge, pas d'exclusion ; l'exclusion passe à G2b. 302 confirmé jusqu'à la fin de la recette |
 | G2 | Implémenter la liste blanche et la redirection conditionnées à l'hôte | Code, Sonnet 5, moyen | **lançable après G0**. La liste tranchée ignore la page **6586**, fiche de L'Indécent |
-| G2b | Produire le fragment `.htaccess` : `X-Robots-Tag` conditionné à l'hôte, et `robots.txt` propre à cet hôte | Code, Sonnet 5, faible | **nouveau**, le plan n'en portait aucune trace |
-| G3 | Déployer G2 et G2b dans la même fenêtre que le moteur, et mener la **recette en six points** du verrou | Code puis Thomas | attend G2, G2b et B8 |
+| G2b | Produire le fragment `.htaccess` : `X-Robots-Tag` conditionné à l'hôte, `robots.txt` propre à cet hôte, et **`Cache-Control: no-cache` conditionné à l'hôte**, que le cache dynamique de SiteGround respecte | Code, Sonnet 5, faible | ouvert |
+| G3 | Déployer G2 et G2b dans la même fenêtre que le moteur, et mener la **recette en six points** du verrou | Code puis Thomas | attend G2 et G2b. **Mesurer en production qu'aucun `HIT` n'apparaît** sur `reservation.sexcaperoom.ch`, ni `x-proxy-cache` ni `x-nitro-cache` : NitroPack n'est pas connecté sur la préproduction, qui ne prouve donc rien sur ce point |
 
 Pourquoi G0 existe. Sans l'exclusion de cache, une réponse mise en cache pour un hôte est servie pour l'autre, et un verrou PHP est sans effet sur une réponse qui ne passe pas par PHP. Et une 301 posée une heure de trop survit dans le navigateur du visiteur : ni une purge ni un correctif ne la rattrapent. C'est le seul geste du chantier dont l'erreur survit à sa correction.
 
@@ -486,9 +495,12 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 
 ## 4. Ce qui revient à Thomas, par ordre
 
-**En tête, depuis le 25 septembre :**
+**En tête, depuis le 26 septembre :**
 
-- **Décider d'exercer la vérification 7.** Recommandation de Cowork : **oui, et le jour même**, parce que la fenêtre du rappel du 25 au 27 septembre contient des arrivées réelles **des deux marques** (1817 et 1434 au Boudoir, 1490 à L'Entracte), ce qui permet le critère décisif de B5 : deux réservations de marques différentes, une seule exécution, deux expéditeurs composés différents. Tout est détourné vers la fourre-tout par le garde-fou 1.1.0, y compris sans hôte HTTP. Effets : Vik écrit ses propres journaux de tâche dans la base de la préproduction, et les adresses de trois vrais clients apparaissent en `X-Original-To` dans la fourre-tout. Déclenchement par `wp cron event run vikbooking_cron_email_reminder_7`, sur la préproduction seulement, par Code sur décision de Thomas. **La fenêtre avance chaque jour** : l'occasion d'avoir les deux marques n'est pas garantie demain.
+- **Lancer la recette F3 en production.** Depuis `~/Documents/icl-dev` : `./appliquer-recette-vik.sh --env production --hote linstantcle.ch`, en simulation d'abord ; attendu : 23 à écrire, 0 écart. Puis `--appliquer --confirmer-production`, et consigner la sortie dans `journal-vik.md`. **S'il faut revenir en arrière, le faire avant l'étape suivante.**
+- **Saisir le code de porte des suites** dans Vik, texte « Front door PIN Suites ». Il ne passe jamais par le script.
+- **Annuler à la main sur `staging13`**, dans Bookings : 1838 à 1841, et 1823 à 1825 (essais du 21 septembre, adresses gmail.com). EMCP ne peut pas écrire, et le contrôleur d'annulation de Vik est fermé en libre-service.
+- **Purger avec la préproduction** : `debug.log` (214 Mo), les deux dossiers de sauvegarde de recette et le journal d'enveloppe, qui contiennent des adresses de clients.
 
 **Faits le 19 septembre**, retirés de cette liste : la sortie de la page 845 et des URL à `sid` de NitroPack, qui ne dispense pas de l'exclusion de l'hôte de réservation, G0, et G1.
 
@@ -505,9 +517,7 @@ maintenant ─┬─ redéploiement ─ recette 2 passes ─ B10 ─ D3 ──�
 4. **Mener la recette**, les huit vérifications du chantier B.
 5. **Poser dans `wp-config.php` la clé Stripe restreinte en lecture et le secret de signature du webhook**, avant le déploiement de B6. La parade est tranchée depuis le 21 septembre, voir le chantier B ; ces deux valeurs sont la seule chose qu'elle attend de toi.
 6. **Interroger Stripe sur les 137 sessions non soldées**, et relever leur `payment_status`. Lecture seule, aucun effet de bord. C'est la seule façon de savoir si un client a été débité sans réservation. Clé secrète Stripe, donc personne d'autre. Parades classées au §8 de `constat-reserve-paiement.md`, à décider ensuite.
-7. **F1**, une minute.
-8. **F3**, avant le 24 septembre, après avoir tranché l'arbitrage des groupements.
-9. **F2**.
+7. ~~F1, F2, F3~~ : réglés par la recette F3, voir en tête.
 10. **Lire l'historique des restaurations de Site Tools pour le 15 septembre 2026** : heure et portée, fichiers ou bases. C'est ce qui tranche entre les deux lectures du §4 de `revue-constat-vikstripe-b4b.md`, et cela décide si le souvenir d'un dysfonctionnement du greffon était juste. Lecture seule, quelques clics.
 11. **Dire d'où vient l'archive de `.local/wp-vikstripe-new`** : le téléversement du 15 septembre, ou une reprise chez vikwp.com le 18. Le constat le suppose sans l'établir.
 12. **Relire et corriger les lignes de `journal-vik.md`** que Cowork et Code y portent désormais, et fournir les deux valeurs qu'eux seuls ne peuvent pas trouver : la portée et l'heure de la restauration du 15 septembre, et le motif de l'écriture du 11 décembre 2025 sur `stripe.php` s'il s'en souvient.
@@ -599,6 +609,7 @@ Entre deux phases, Thomas avance ses gestes. Ils sont courts, mais chacun déblo
 |---|---|---|
 | 1.0 | 2026-09-09 | Création. Cinq chantiers, séquencement, prompts de lancement. |
 | 2.0 | 2026-09-17 | Remise à l'état réel : A1 à A4, B1 à B3, B4a, C1 à C4, D1 et D2 faits. Ajout de B5, B6, B7, C5, D4, E7, du chantier F et du chantier G. Prompts des tâches faites retirés, prompts des tâches ouvertes écrits ou révisés. Ajout du chapitre 4, ce qui revient à Thomas, et du chapitre 6, les deux choses à ne pas oublier. |
+| 2.21 | 2026-09-26 | Vérification 7 établie. Recette F3 (B13) appliquée sur la préproduction : F1, F2 et F3 réglés, production à lancer par Thomas. B12, l'adresse de réponse de B5 alignée sur la marque. G0 fait, l'exclusion SiteGround passe à G2b, la mesure sans `HIT` à G3. Quatre décisions : écriture par recette sur trois tables, réservations d'essai par le script jusqu'au paiement, adresse de réponse, lecture en base64 sur linstantcle.ch. Écarts de la 2.20 corrigés : garde-fou 1.1.0 déployé en préproduction, doublon B9e retiré, en-tête des chantiers, F3 daté. |
 | 2.20 | 2026-09-25 | Parcours complet sans Vik Channel Manager. La marque d'expéditeur des confirmations est composée juste et reçue telle quelle : vérification 5 établie de bout en bout. Une conclusion inverse sur le relais Gmail, tirée des copies administrateur, est corrigée ; C6 retiré. B9i fermé : 6c était un faux positif par construction, l'annulation en libre-service est fermée par réglage, la vérification 7 constate sans déclencher. |
 | 2.19 | 2026-09-25 | Vik Channel Manager se **retire** de la préproduction au lieu de se désactiver : Vik Booking le détecte par ses fichiers, et désactivé il fait planter toute réservation. Opus 5.5 effort moyen devient le modèle par défaut de Code. |
 | 2.18 | 2026-09-24 | Recréation de la préproduction : WooCommerce Payments et PayPal **désactivés** plutôt que basculés en test ; régénération des clés des greffons maison et coupure de la traduction automatique **écartées**, motifs au chantier B. — **Reconstruction** d'une révision perdue au commit `bec2ac9`, restauré en 2.17 par `6156d9f`. **Incident** : Vik Channel Manager actif sur la préproduction a poussé chaque réservation d'essai vers Airbnb, Booking.com et Expedia ; exposition réelle établie par les calendriers partagés, L'Entracte et L'Aparté fermés ; réparé le jour même depuis la production. B9h, B11 et B9j livrés et revus. Première reprise : le paiement de la phase 4 aboutit. Revue de B5. WooCommerce Payments trouvé en mode réel sur la préproduction. Chapitre 4 : recréation de la préproduction réécrite. Ajout de B9i, B11b. |
