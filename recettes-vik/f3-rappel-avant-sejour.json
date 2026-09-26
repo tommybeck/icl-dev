@@ -1,0 +1,48 @@
+{
+  "nom": "f3-rappel-avant-sejour",
+  "source": "docs/briefs/brief-f3-rappel-avant-sejour.md, version 1.1 du 26 septembre 2026",
+  "chambres_requises": [1, 2, 4, 5, 6, 7, 8, 9, 10],
+  "regles": [
+    { "token": "{condition: front_door_pin_cinema}", "avant": [1, 5], "apres": [1, 5, 7, 10] },
+    { "token": "{condition: checkin_time_cinema}", "avant": [1, 5], "apres": [1, 5, 7, 10] },
+    { "token": "{condition: checkout_time_cinema}", "avant": [1, 5], "apres": [1, 5, 7, 10] },
+    { "token": "{condition: address_cinema}", "avant": [1, 5], "apres": [1, 5, 7, 8, 9, 10] },
+    { "token": "{condition: parking_space_cinema}", "avant": [1, 5], "apres": [1, 5, 7, 8, 9, 10] },
+    { "token": "{condition: access_map_cinema}", "avant": [1, 5], "apres": [1, 5, 7, 8, 9, 10] },
+    { "token": "{condition: room_name_cinema}", "avant": [1, 5], "apres": [1, 5, 7] },
+    { "token": "{condition: at_room_name_cinema}", "avant": [1, 5], "apres": [1, 5, 7] },
+    { "token": "{condition: room_name_maisonnette}", "avant": [2, 4, 6], "apres": [2, 6] },
+    { "token": "{condition: at_room_name_lindcent}", "avant": [], "apres": [9] },
+    { "token": "{condition: at_room_name_la_parenthse}", "avant": [], "apres": [8] },
+    { "token": "{condition: room_name_lindcent}", "avant": [], "apres": [9] },
+    { "token": "{condition: room_name_la_parenthse}", "avant": [], "apres": [8] }
+  ],
+  "textes_crees": [
+    { "name": "Room name Boudoir", "token": "{condition: room_name_boudoir}", "chambres": [4], "msg": "Le Boudoir du Désir", "msg_libre": false },
+    { "name": "Room name Huis Clos", "token": "{condition: room_name_huis_clos}", "chambres": [10], "msg": "À Huis Clos", "msg_libre": false },
+    { "name": "At room name Huis Clos", "token": "{condition: at_room_name_huis_clos}", "chambres": [10], "msg": "dans la villa À Huis Clos", "msg_libre": false },
+    { "name": "Check-in time Suites", "token": "{condition: checkin_time_suites}", "chambres": [8, 9], "msg": "15:00", "msg_libre": false },
+    { "name": "Checkout time Suites", "token": "{condition: checkout_time_suites}", "chambres": [8, 9], "msg": "12:00", "msg_libre": false },
+    { "name": "Front door PIN Suites", "token": "{condition: front_door_pin_suites}", "chambres": [8, 9], "msg": "", "msg_libre": true }
+  ],
+  "gabarit": {
+    "class_file": "email_reminder",
+    "cron_name": "Check-in info",
+    "cle": "tpl_text",
+    "sha256_avant": "22b98ba381185bf34cf7d958fff9035e6dd2917e3b53ace7eaf3eb39d02563f3",
+    "sha256_apres": "44b2f30a00f863212e42bde3b156f5ae42857222812a6c4546f23b13d069909d",
+    "remplacements": [
+      ["{condition: at_room_name_cinema}", "{condition: at_room_name_cinema}{condition: at_room_name_huis_clos}{condition: at_room_name_lindcent}{condition: at_room_name_la_parenthse}"],
+      ["{condition: checkin_time_cinema}", "{condition: checkin_time_cinema}{condition: checkin_time_suites}"],
+      ["{condition: checkout_time_cinema}", "{condition: checkout_time_cinema}{condition: checkout_time_suites}"],
+      ["{condition: room_name_cinema}", "{condition: room_name_cinema}{condition: room_name_boudoir}{condition: room_name_huis_clos}{condition: room_name_lindcent}{condition: room_name_la_parenthse}"],
+      ["{condition:access_map_cinema}", "{condition: access_map_cinema}"],
+      ["{condition: front_door_pin_cinema}", "{condition: front_door_pin_cinema}{condition: front_door_pin_suites}"]
+    ]
+  },
+  "supplements_adultes": [
+    { "idroom": 10, "adults": 3, "chdisc": 1, "valpcent": 1, "pernight": 1, "avant": "30.00", "apres": "45.00" },
+    { "idroom": 10, "adults": 4, "chdisc": 1, "valpcent": 1, "pernight": 1, "avant": "60.00", "apres": "90.00" },
+    { "idroom": 10, "adults": 5, "chdisc": 1, "valpcent": 1, "pernight": 1, "avant": "90.00", "apres": "135.00" }
+  ]
+}
