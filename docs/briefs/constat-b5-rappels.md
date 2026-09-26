@@ -179,7 +179,7 @@ Inchangé, et sa nécessité est renforcée : un rappel qui part du bon expédit
 
 Ce qui l'a motivée : la revue de B5 du 24 septembre (`plan-de-marche.md`, « La revue de B5 », point 3) et la recette F3 sur staging13 (`constat-recette-f3.md` §5.4), où les trois rappels partaient bien de `reservations@sexcaperoom.ch` ou `reservations@linstantcle.ch` mais portaient tous `Reply-To: …@maisonnette-enchantee.ch`. Un client Sexcape Room qui répondait au rappel voyait un troisième domaine.
 
-Source : copie SFTP de Vik Booking **1.8.14** dans `.local/`, en lecture seule. `CLAUDE.md` cite 1.8.15 pour une autre ligne : les numéros ci-dessous sont ceux de 1.8.14 et **n'ont pas été relus sur 1.8.15**. À refaire lors de la recette sur staging, la vérification tenant en cinq `grep`.
+Source : copie SFTP de Vik Booking **1.8.14** dans `.local/`, en lecture seule. `CLAUDE.md` cite 1.8.15 pour une autre ligne : les numéros ci-dessous sont ceux de 1.8.14 et **n'ont pas été relus sur 1.8.15**. À refaire lors de la recette sur staging, la vérification tenant en cinq `grep`. **Relu sur 1.8.15 le 26 septembre 2026, voir §10.7** : chaîne identique, un seul décalage de numéros de ligne.
 
 ### 10.1 Comment Vik passe l'adresse de réponse, à la source
 
@@ -267,8 +267,40 @@ Je n'écris pas dans `plan-de-marche.md`. Matière à y reporter :
 - **Le verrou « attend C2 »** de ce constat (§7) est périmé, comme la revue l'a relevé. Le remplace le préalable du §10.4 : une réponse d'essai reçue sur chacun des deux groupes `reservations@`.
 - **À signaler à Thomas** : les réponses à ses messages écrits à la main depuis une réservation iront au groupe `reservations@` de la marque.
 
+### 10.7 Relecture sur Vik 1.8.15, et déploiement sur staging13 — 26 septembre 2026
+
+**Source.** `wp-content/plugins/vikbooking` de staging13, en-tête `Version: 1.8.15`, lu par SSH, sans rien écrire. Les mêmes commandes ont tourné sur la copie 1.8.14 de `.local/`, en lecture seule, et les deux sorties ont été comparées par `diff`.
+
+Le §10 annonçait cinq `grep` sans les écrire. Les voici, un par maillon de la chaîne du §10.1 :
+
+| # | Commande (depuis le dossier du greffon) | 1.8.14 (§10.1) | 1.8.15 |
+|---|---|---|---|
+| G1 | `grep -n "function sendMail\|'reply' *=>\|new VBOMailWrapper" admin/helpers/jv_helper.php` | `:68`, `:123-131` | `:68` signature, `$reply_address` en 4ᵉ ; `:123` wrapper ; `:127` `'reply' => $reply_address` — **identique** |
+| G2 | `grep -n 'sendMail(\|\$admin_sendermail' admin/cronjobs/email_reminder.php` | `:658-660` | `:658` `getSenderMail()` ; `:660` `$admin_sendermail` en 1, 2 et 4 — **identique** |
+| G3 | `grep -n 'final class\|private \$reply\|function setReply\|function getReply\|function bind\|\$this->reply' admin/helpers/src/mail/wrapper.php` | `:58`, `:133-151`, `:261-266`, `:273-276` | `:37` `final class` ; `:58` `private $reply` ; `:125` `bind()`, dont la boucle traduit `reply` en `setReply` (`'set' . ucfirst($k)`) ; `:261-263` affectation, qui remplace ; `:273-275` lecture — **identique** |
+| G4 | `grep -n 'function send\|function prepare\|prepare(\|onBeforeSendMail\|->send(' admin/helpers/src/platform/org/wordpress/mailer.php` | `:34`, `:52`, `:37` | `:34` `prepare()`, `:52` `onBeforeSendMail`, `:37` `$service->send()` : le hook part avant l'envoi — **identique** |
+| G5 | `grep -n 'getReply\|addReplyTo' admin/helpers/src/mail/service/phpmailer.php` | `:52-56` | `:52` `if ($mail->getReply())`, `:55` `addReplyTo()` — **identique** |
+
+Relus en plus, parce que le §10.1 et le §10.4 les citent :
+
+| Emplacement cité | 1.8.15 |
+|---|---|
+| `getMailer()` sans cache, `factory.php:185-197` | `:185`, commentaire `:191`, `return new JMail` `:196` — identique |
+| `JMail::Send()`, `mail.php:172-178` et `:201` | `Reply-to:` `:176`, `wp_mail()` `:201` — identique |
+| `getSenderMail()`, `lib.vikbooking.php:3587-3592` | `:3587`, repli sur `getAdminMail()` si `senderemail` est vide — identique |
+| Pré-enregistrement, `precheckin_reminder.php:508` | `:508` — identique |
+| Messagerie en lot, `widgets/bulk_messaging.php:1112` | `:1112` — identique. Chemin complet : `admin/helpers/widgets/bulk_messaging.php` |
+| Facture, `lib.vikbooking.php:11313` | **`:11333`**, instruction identique, dans `sendBookingInvoice()` (`:11307`, 1.8.14 : `:11287`) |
+| Message manuel, `admin/controller.php:10052` et `:9990` | `:10052`, `:9990` — identique |
+
+**Seul écart** : dans `site/helpers/lib.vikbooking.php`, les lignes situées après `getSenderMail()` descendent de 20. La facture passe de `:11313` à `:11333`, les deux messages d'erreur SMS de `:10085`/`:10102` à `:10105`/`:10122`. Le texte des instructions ne change pas. **La conclusion du §10.1 tient sur 1.8.15** : `$mail->setReply()` dans `vikbooking_before_send_mail` suffit, et rien dans Vik ne le défait avant l'envoi.
+
+Les doublures de `test-mail-source.php` reproduisent `VBOMailWrapper` 1.8.14. Sur les méthodes qu'elles imitent (`bind`, `setReply`, `getReply`), 1.8.15 est identique : elles restent fidèles.
+
+**Déploiement.** `mail-brand.php` (B12) est déployé sur staging13 le 26 septembre 2026 par `deployer-moteur.sh`, avec `core.php` et `room-filter.php` (B11b) : simulation, puis `--appliquer`. Empreintes conformes, aucune erreur fatale dans `debug.log`. Le détail est dans `constat-vues-vik-par-view.md` §5. **Le Reply-To n'est pas encore vérifié sur un message réel** : les assertions 1 bis à 7 bis du §10.5 demandent un rappel qui part, et aucune réservation n'a été créée ce jour-là. Le préalable du §10.4, une réponse d'essai reçue sur chacun des deux groupes `reservations@`, est toujours ouvert. Rien n'est déployé en production.
+
 ---
 
 ## Verdict de chantier
 
-**La source des rappels avant séjour porte la marque de leur réservation.** Expéditeur, nom d'affichage et, depuis le 26 septembre, adresse de réponse — rien d'autre. La réservation se retrouve par le magasin natif de Vik et se vérifie par le destinataire, jamais par une devinette. Marque indéterminée : identité neutre, alerte, jamais la mauvaise marque. Aucun message doublé, aucun fichier de Vik modifié, 110 tests unitaires au vert à la livraison, 141 tests purs et 22 tests du hook au 26 septembre. Le contenu reste au chantier F, et rien n'est déployé.
+**La source des rappels avant séjour porte la marque de leur réservation.** Expéditeur, nom d'affichage et, depuis le 26 septembre, adresse de réponse — rien d'autre. La réservation se retrouve par le magasin natif de Vik et se vérifie par le destinataire, jamais par une devinette. Marque indéterminée : identité neutre, alerte, jamais la mauvaise marque. Aucun message doublé, aucun fichier de Vik modifié, 110 tests unitaires au vert à la livraison, 141 tests purs et 22 tests du hook au 26 septembre. Le contenu reste au chantier F. Déployé sur staging13 le 26 septembre (§10.7), rien en production.

@@ -1114,7 +1114,7 @@ if [ -n "$REPRISE_IDORDER" ]; then
   exit $?
 fi
 
-[ -n "$VERIFS_CHOISIES" ] && info "vérifications choisies :$VERIFS_CHOISIES"
+[ -n "$VERIFS_CHOISIES" ] && info "vérifications choisies :${VERIFS_CHOISIES% }"
 
 # Aucune vérification par passe choisie (--verification 8 seule) : le levier
 # n'est ni lu ni posé.
@@ -1171,7 +1171,7 @@ RC_RAPPORT=$?
 
 if [ -n "$VERIFS_CHOISIES" ]; then
   echo
-  jaune "Recette partielle : seules les vérifications$VERIFS_CHOISIES ont été menées."
+  jaune "Recette partielle : seules les vérifications${VERIFS_CHOISIES% } ont été menées."
 elif [ "$APPLIQUER" -eq 0 ]; then
   echo
   jaune "Simulation partielle : --appliquer n'a pas été passé. Vérifications 5, 6 et 7 non menées."

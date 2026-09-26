@@ -311,6 +311,61 @@ la préproduction, ce que cette tâche ne fait pas. C'est la preuve qui manque a
 la tâche à « fait ». Les autres vérifications de cette exécution : 1a, 1b, 3a et 4 OK dans
 les deux passes, 3b non concluant (connu), 8 KO annoncé (G2 absent). Levier restauré.
 
+### Le vert sur le correctif, le 26 septembre 2026
+
+**Déploiement.** `./deployer-moteur.sh --env staging --hote staging13.linstantcle.ch`, en
+simulation puis avec `--appliquer`, sur l'état du dépôt au commit `384916d`. Le plan de la
+simulation ne listait à mettre à jour que `core.php`, `room-filter.php`, `mail-brand.php`
+(B12, voir `constat-b5-rappels.md` §10.7) et le `README.md` de `lme-brands`. Tout le reste
+était déjà à jour. Empreintes vérifiées après copie, `functions.php` inchangé (7463 o),
+`https://staging13.linstantcle.ch/` en 200, aucune erreur fatale dans `debug.log` depuis
+le déploiement, apparence Sexcape Room active sous le levier. Environnement relevé :
+`73746167696e67` (`staging`).
+
+**Vérification 2 seule.** `./recetter-moteur.sh --hote staging13.linstantcle.ch --verification 2`,
+sans `--appliquer`. L'option `--verification` a été ajoutée pour cette mesure (commit
+`384916d`) : sans elle, la vérification 3 tournait à chaque passe, et elle peut créer une
+réservation si la garde laisse passer. Rapport : `SORTIE=0`.
+
+| # | Vecteur | Sexcape Room (chambre étrangère #2) | L'Instant Clé (chambre étrangère #4) |
+|---|---|---|---|
+| — | témoin, page propre sans paramètre | OK, #4 seule | OK, #2 seule |
+| 1 | `roomdetails`, `roomid` étranger | OK, #4 | OK, #2 |
+| 2 | `availability`, `room_ids` étranger | OK, #4 | OK, #2 |
+| 3 | `availability`, sans sélection | OK, #4 | OK, #2 |
+| 4 | `roomslist`, `category_id` = chambre étrangère | OK, #4 | OK, #8 |
+| 5 | `roomslist`, sans sélection | OK, #4 | OK, #2 |
+| 6 | `search`, `roomdetail` étranger | OK, #9, #4, #10 | OK, #8, #2, #1, #7 |
+| 7 | `availability`, `room_ids[]=…abc` | OK, #4 | OK, #2 |
+| 8 | `loginregister`, `roomid[]` étranger | OK, #4 | OK, #2 |
+| 9 | `promotions` | OK, #4 | OK, #2 |
+| 10 | `searchsuggestions`, sans catégorie | OK, #4 | OK, #2 |
+| 11 | AJAX `roomdetails`, `roomid` étranger | OK, 303, aucune vue | OK, 303, aucune vue |
+| 12 | AJAX `availability` | OK, 403 | OK, 403 |
+| 13 | AJAX `roomslist` | OK, 403 | OK, 403 |
+| 14 | AJAX `promotions` | OK, 403 | OK, 403 |
+| 15 | AJAX `searchsuggestions`, `getjson` | OK, 403 | OK, 403 |
+
+Chaque vecteur est lu deux fois à deux secondes d'écart, et les deux lectures concordent
+partout : aucun signe de cache. Les chambres « propres » sont résolues sur le serveur par
+le registre de `lme-brands` : #4, #9 et #10 pour Sexcape Room, #1, #2, #7 et #8 pour
+L'Instant Clé. **Les neuf vecteurs rouges sur le fichier de B11 sont verts sur le
+correctif, dans les deux sens, et les six de B11 le restent.**
+
+**Vérification 3 juste après.** `--verification 3`, sans `--appliquer`, parce que B11b
+touche `core.php`, dont dépend la garde. 3a OK dans les deux passes : chambre étrangère
+refusée en `403`, « Réservation refusée », arrivée 2026-11-25. 3b non concluant dans les
+deux passes, comme les fois précédentes (aucun tarif proposé pour les chambres #5 et #6,
+`avail = 0`). `SORTIE=2`, à cause de ces deux « ?? ». **Aucune réservation créée** :
+`sir_vikbooking_orders` ne compte aucune ligne de `ts` postérieur au 2026-09-26 00:00 UTC,
+l'identifiant maximal reste 1837, et le registre local n'a pris aucune ligne.
+
+Levier : `7265736572766174696f6e2e73657863617065726f6f6d2e6368` (`reservation.sexcaperoom.ch`)
+à l'entrée et à la sortie de chaque exécution. Avant la vérification 2, cette valeur est
+l'empreinte de la valeur que le script a journalisée. Avant la vérification 3, et après
+chacune des deux, elle a été relue en hexadécimal dans `wp-config.php`, par sa seule clé.
+Une seule ligne `LME_BRANDS_HOST_OVERRIDE`.
+
 ---
 
 ## 6. La correction de `constat-phase-0.md` Q4
@@ -331,9 +386,12 @@ interroge la base. `room-filter.php` n'en fait pas usage. Son en-tête et le `RE
 
 ## 7. Ce qui reste
 
-- **Déployer sur la préproduction** `mu-plugins/lme-brands/includes/core.php` et
+- ~~**Déployer sur la préproduction** `mu-plugins/lme-brands/includes/core.php` et
   `includes/room-filter.php`, puis rejouer `./recetter-moteur.sh --hote staging13.linstantcle.ch` :
-  la vérification 2 doit passer au vert dans les deux sens. Rien ne vaut preuve avant.
+  la vérification 2 doit passer au vert dans les deux sens. Rien ne vaut preuve avant.~~
+  **Fait le 26 septembre 2026 sur staging13** (§5, « Le vert sur le correctif ») : quinze
+  vecteurs verts dans les deux passes, et la garde tient toujours (3a). **La production
+  reste à faire**, par Thomas seul.
 - **Forfaits** : fermer `packageslist` et `packagedetails` avant d'ouvrir un forfait (§4).
 - **Suggestions sur L'Instant Clé** : décider si la chambre 10 doit recevoir une catégorie
   dans Vik (§4). Écriture dans Vik, donc par Thomas.
@@ -346,6 +404,11 @@ interroge la base. `room-filter.php` n'en fait pas usage. Son en-tête et le `RE
 
 - Aucun fichier déployé, aucun fichier temporaire posé. Les scripts de mesure vivent hors du
   dépôt, dans le répertoire de travail de la session.
+- **Depuis le 26 septembre 2026** : B11b (`core.php`, `room-filter.php`) et B12
+  (`mail-brand.php`) sont déployés sur staging13 par `deployer-moteur.sh`, avec le
+  `README.md` de `lme-brands`. La sauvegarde que le script prend avant d'écrire est dans
+  `~/.icl-dev-deploy-backups/staging13.linstantcle.ch/20260926T124153Z/`. Rien n'est déployé
+  en production.
 - Levier : `reservation.sexcaperoom.ch` à l'entrée, relu en sortie de chaque passage
   (`7265736572766174696f6e2e73657863617065726f6f6d2e6368`).
 - `debug.log` : les lignes `lme-brands` des mesures (retraits, emplois du levier), aucune
@@ -359,7 +422,7 @@ interroge la base. `room-filter.php` n'en fait pas usage. Son en-tête et le `RE
 | `mu-plugins/lme-brands/includes/room-filter.php` | AJAX du site filtré ; `loginregister`, `promotions`, `searchsuggestions` fermées ; lecture `int` de `room_ids` et `category_id` ; refus 403 en AJAX ; en-tête corrigé |
 | `mu-plugins/lme-brands/tests/test-core.php` | 25 tests |
 | `mu-plugins/lme-brands/README.md` | couche de présentation et tests mis à jour |
-| `recetter-moteur.sh` | vérification 2 : neuf vecteurs, extracteur étendu, AJAX |
+| `recetter-moteur.sh` | vérification 2 : neuf vecteurs, extracteur étendu, AJAX ; le 26 septembre, `--verification N` (répétable ou en liste) et en-tête corrigé : sans `--appliquer`, la vérification 3 peut créer une réservation si la garde laisse passer |
 | `docs/briefs/constat-phase-0.md` | Q4 corrigée, paragraphe fautif gardé et désigné comme faux |
 | `docs/briefs/constat-correctif-room-filter.md` | renvoi vers ce constat au §5 |
 
