@@ -759,6 +759,39 @@ function lme_brands_mail_booking_matches_recipients( $booking, $recipients ) {
 }
 
 /**
+ * Adresse de réponse à poser sur un message du chantier B5, ou null pour
+ * garder celle que l'émetteur de Vik a posée.
+ *
+ * Décision de Thomas, 26 septembre 2026 : le Reply-To des messages que B5
+ * réécrit s'aligne sur l'expéditeur de la marque de la réservation, comme
+ * pour le message client de la phase 3. Voir docs/briefs/constat-b5-rappels.md
+ * §10.
+ *
+ * Deux cas gardent l'adresse de Vik :
+ *
+ * - l'identité ne porte pas d'adresse de réponse — c'est l'identité neutre,
+ *   marque mêlée ou indéterminée, dont `reply_to` vaut null au registre ;
+ * - l'expéditeur n'a pas été posé. Le Reply-To suit le From : poser l'adresse
+ *   d'une marque sur un message qui part sous l'expéditeur global de
+ *   l'installation créerait l'incohérence que cette décision supprime.
+ *
+ * @param array $identity       Sortie de lme_brands_mail_identity().
+ * @param bool  $sender_applied Sortie de lme_brands_apply_mail_sender().
+ * @return string|null
+ */
+function lme_brands_mail_source_reply_to( array $identity, $sender_applied ) {
+	if ( true !== $sender_applied ) {
+		return null;
+	}
+
+	if ( ! isset( $identity['reply_to'] ) || ! is_string( $identity['reply_to'] ) || '' === $identity['reply_to'] ) {
+		return null;
+	}
+
+	return $identity['reply_to'];
+}
+
+/**
  * Résout la marque d'une réservation à partir des chambres qu'elle porte.
  *
  * Le hook d'envoi ne transporte pas les identifiants de chambre

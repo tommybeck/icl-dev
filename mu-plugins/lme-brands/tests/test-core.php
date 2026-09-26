@@ -983,6 +983,38 @@ lme_brands_test_assert(
 	"marque indéterminée sur un rappel : nom neutre, et l'adresse de Vik gardée plutôt qu'une adresse inventée"
 );
 
+// --- Chantier B5, décision du 26 septembre 2026 : l'adresse de réponse ------------
+
+echo "\nlme_brands_mail_source_reply_to()\n";
+
+lme_brands_test_assert(
+	'reservations@sexcaperoom.ch' === lme_brands_mail_source_reply_to( $b5_identity, true ),
+	"marque résolue, expéditeur posé : l'adresse de réponse de la marque"
+);
+
+lme_brands_test_assert(
+	null === lme_brands_mail_source_reply_to( $b5_neutral, true ),
+	"marque mêlée : null, donc l'adresse de réponse de Vik est gardée"
+);
+
+lme_brands_test_assert(
+	null === lme_brands_mail_source_reply_to( $b5_identity, false ),
+	"expéditeur refusé : null, l'adresse de réponse suit le From et ne part pas seule vers la marque"
+);
+
+lme_brands_test_assert(
+	null === lme_brands_mail_source_reply_to( $b5_identity, 1 )
+		&& null === lme_brands_mail_source_reply_to( $b5_identity, 'true' ),
+	'seul un true strict vaut expéditeur posé'
+);
+
+lme_brands_test_assert(
+	null === lme_brands_mail_source_reply_to( array( 'reply_to' => '' ), true )
+		&& null === lme_brands_mail_source_reply_to( array(), true )
+		&& null === lme_brands_mail_source_reply_to( array( 'reply_to' => array( 'a@b.ch' ) ), true ),
+	'adresse de réponse vide, absente ou mal formée : null, jamais une chaîne vide posée'
+);
+
 // --- Phase 3 sur le registre réel --------------------------------------------------
 
 echo "\nPhase 3, registre réel config/brands.php\n";
@@ -1010,6 +1042,22 @@ lme_brands_test_assert(
 		&& false === stripos( (string) $real_neutral['subject'], 'instant' )
 		&& false === stripos( (string) $real_neutral['subject'], 'sexcape' ),
 	'registre réel : une chambre inconnue produit une identité qui ne nomme aucune des deux marques'
+);
+
+// Décision de Thomas du 26 septembre 2026 : l'adresse de réponse s'aligne sur
+// l'expéditeur de la marque. Si une marque devait un jour répondre ailleurs
+// qu'elle n'écrit, ce test tombe exprès : c'est un changement de décision,
+// pas une retouche de registre.
+$real_aligned = true;
+foreach ( $real_config['brands'] as $real_brand ) {
+	if ( $real_brand['reply_to'] !== $real_brand['sender_email'] ) {
+		$real_aligned = false;
+	}
+}
+
+lme_brands_test_assert(
+	$real_aligned && null === $real_neutral['reply_to'],
+	"registre réel : chaque marque répond à l'adresse d'où elle écrit, et l'identité neutre garde celle de Vik"
 );
 
 // --- Correctif du 22 septembre 2026 (B9c) : la vraie signature du rappel de paiement --

@@ -32,9 +32,10 @@
  *
  * D'où le second point d'accroche, en bas de ce fichier :
  * `vikbooking_before_send_mail`, le seul hook que **tous** les e-mails de Vik
- * traversent, rappels compris. Il ne pose que l'expéditeur et le nom
- * affiché, et rien d'autre : le contenu du rappel vit dans le gabarit de la
- * tâche planifiée, côté Vik, et se sépare par marque là-bas (chantier F).
+ * traversent, rappels compris. Il pose l'expéditeur, le nom affiché et
+ * l'adresse de réponse, et rien d'autre : le contenu du rappel vit dans le
+ * gabarit de la tâche planifiée, côté Vik, et se sépare par marque là-bas
+ * (chantier F).
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -134,8 +135,9 @@ function lme_brands_rewrite_booking_mail( $who, $booking, $mail ) {
  * Pose l'expéditeur et le nom affiché, et refuse une identité bancale.
  *
  * Partagée par les deux points d'accroche de ce fichier : le hook métier, qui
- * réécrit tout le message client, et le hook générique du chantier B5, qui ne
- * pose que cela. Le piège de `setSender()` n'a ainsi qu'un seul gardien.
+ * réécrit tout le message client, et le hook générique du chantier B5, qui y
+ * ajoute seulement l'adresse de réponse. Le piège de `setSender()` n'a ainsi
+ * qu'un seul gardien.
  *
  * @param object $mail
  * @param array  $identity   Voir lme_brands_mail_identity().
@@ -336,8 +338,9 @@ function lme_brands_brand_mail_ical( $recip, $booking, &$ics_str ) {
 add_action( 'vikbooking_before_send_mail', 'lme_brands_brand_mail_source', 10, 1 );
 
 /**
- * Pose l'expéditeur et le nom affiché de la marque sur un message que le hook
- * métier n'a pas vu — au premier chef le rappel avant séjour.
+ * Pose l'expéditeur, le nom affiché et l'adresse de réponse de la marque sur
+ * un message que le hook métier n'a pas vu — au premier chef le rappel avant
+ * séjour.
  *
  * `vikbooking_before_send_mail` (`onBeforeSendMail`, émis par
  * `platform/org/wordpress/mailer.php:52`) est le seul point d'accroche que
@@ -348,8 +351,18 @@ add_action( 'vikbooking_before_send_mail', 'lme_brands_brand_mail_source', 10, 1
  *
  * --- Ce qui est posé, et ce qui ne l'est pas --------------------------------
  *
- * **L'expéditeur et le nom affiché, rien d'autre.** Ni objet, ni corps, ni
- * adresse de réponse. Le corps d'un rappel vient du gabarit de la tâche
+ * **L'expéditeur, le nom affiché et l'adresse de réponse, rien d'autre.**
+ * L'adresse de réponse s'aligne sur l'expéditeur de la marque, comme pour le
+ * message client : décision de Thomas du 26 septembre 2026, qui lève la
+ * réserve de B5 — la boîte `reservations@` de chaque marque existe depuis
+ * C2. Vik la passe en quatrième argument de `sendMail()`
+ * (`email_reminder.php:660`), elle arrive dans le wrapper par `bind()`
+ * (`jv_helper.php:127`), et le service PHPMailer ne la lit qu'à l'envoi,
+ * après ce hook (`phpmailer.php:52-56`) : `setReply()` ici suffit. Marque
+ * mêlée ou indéterminée : l'identité neutre n'en porte pas, l'adresse de Vik
+ * reste — voir lme_brands_mail_source_reply_to().
+ *
+ * Ni objet, ni corps. Le corps d'un rappel vient du gabarit de la tâche
  * planifiée, saisi dans l'administration de Vik, où vivent aujourd'hui le
  * logo et le titre L'Instant Clé, inconditionnels : c'est là qu'ils se
  * séparent par marque, par les textes conditionnels natifs, et c'est le
@@ -405,7 +418,9 @@ function lme_brands_brand_mail_source( $mail ) {
 	if ( ! is_object( $mail )
 		|| ! method_exists( $mail, 'setSender' )
 		|| ! method_exists( $mail, 'getSenderMail' )
-		|| ! method_exists( $mail, 'getRecipient' ) ) {
+		|| ! method_exists( $mail, 'getRecipient' )
+		|| ! method_exists( $mail, 'setReply' )
+		|| ! method_exists( $mail, 'getReply' ) ) {
 		lme_brands_log(
 			'error',
 			'mail_wrapper_unexpected',
@@ -459,10 +474,11 @@ function lme_brands_brand_mail_source( $mail ) {
 			'error',
 			'mail_brand_undetermined',
 			sprintf(
-				"Marque indéterminée (%s) pour un message de Vik adressé au client de la réservation #%d : envoi sous l'expéditeur neutre '%s', jamais sous une marque.",
+				"Marque indéterminée (%s) pour un message de Vik adressé au client de la réservation #%d : envoi sous l'expéditeur neutre '%s', jamais sous une marque, et adresse de réponse de Vik gardée (%s).",
 				$resolution['reason'],
 				$booking_id,
-				$identity['sender_name']
+				$identity['sender_name'],
+				(string) $mail->getReply()
 			),
 			array(
 				'booking_id'    => $booking_id,
@@ -474,6 +490,7 @@ function lme_brands_brand_mail_source( $mail ) {
 				// situation. Ce qui change, c'est le chemin d'envoi, et c'est
 				// ce que porte cette clé.
 				'chemin'        => 'vikbooking_before_send_mail',
+				'reply_to_kept' => $mail->getReply(),
 			)
 		);
 	}
@@ -484,7 +501,12 @@ function lme_brands_brand_mail_source( $mail ) {
 	// repli `SplObjectStorage`, de retenir en mémoire chacun des messages d'une
 	// exécution de la tâche de rappel, qui en envoie autant qu'il y a
 	// d'arrivées à deux jours.
-	lme_brands_apply_mail_sender( $mail, $identity, $booking_id );
+	$sender_applied = lme_brands_apply_mail_sender( $mail, $identity, $booking_id );
+	$reply_to       = lme_brands_mail_source_reply_to( $identity, $sender_applied );
+
+	if ( null !== $reply_to ) {
+		$mail->setReply( $reply_to );
+	}
 }
 
 /**
